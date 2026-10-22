@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: vijayalakshmi-minimart-pos
+    runtime: node
+    plan: free
+    buildCommand: npm run postinstall && npm run build
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000

@@ -1,0 +1,24 @@
+{
+  "name": "retail-pos-system",
+  "version": "1.0.0",
+  "description": "VijayaLakshmi Minimart - Retail POS, Billing, Inventory & Analytics System",
+  "main": "backend/server.js",
+  "scripts": {
+    "postinstall": "npm install --prefix backend && npm install --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start": "node backend/server.js",
+    "dev:backend": "cd backend && node server.js",
+    "dev:frontend": "cd frontend && npm run dev",
+    "seed": "cd backend && node seed_sales.js"
+  },
+  "keywords": [
+    "pos",
+    "retail",
+    "billing",
+    "inventory",
+    "sqlite",
+    "vijayalakshmi-minimart"
+  ],
+  "author": "",
+  "license": "ISC"
+}
