@@ -907,23 +907,33 @@ app.delete('/api/orders/:id', (req, res) => {
   }
 });
 
-// Serve static assets from backend public folder
+// Serve static assets from backend public folder (images, icons)
 const publicPath = path.join(__dirname, 'public');
 if (fs.existsSync(publicPath)) {
   app.use(express.static(publicPath));
 }
 
-// Serve built frontend files in production if dist exists
-const distPath = path.join(__dirname, '../frontend/dist');
+// Serve built frontend files in production
+const candidateDistPaths = [
+  path.join(__dirname, '../frontend/dist'),
+  path.join(__dirname, 'public'),
+  path.join(process.cwd(), 'frontend/dist'),
+  path.join(process.cwd(), 'dist')
+];
 
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+const staticDir = candidateDistPaths.find(p => fs.existsSync(p) && fs.existsSync(path.join(p, 'index.html')));
+
+if (staticDir) {
+  console.log(`Serving frontend static files from: ${staticDir}`);
+  app.use(express.static(staticDir));
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {
-      return res.sendFile(path.join(distPath, 'index.html'));
+      return res.sendFile(path.join(staticDir, 'index.html'));
     }
     next();
   });
+} else {
+  console.warn('Warning: No built frontend index.html found. Checked:', candidateDistPaths);
 }
 
 app.listen(PORT, () => {
