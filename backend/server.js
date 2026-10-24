@@ -228,37 +228,119 @@ app.delete('/api/products/:id', (req, res) => {
 // ----------------- INVENTORY / STOCK-IN API -----------------
 app.post('/api/inventory/stock-in', (req, res) => {
   try {
-    const { product_id, quantity, cost_price, supplier_name, invoice_no, notes } = req.body;
-    if (!product_id || !quantity || Number(quantity) <= 0) {
-      return res.status(400).json({ error: 'Valid product and quantity are required' });
+    const { supplier_name, invoice_no, notes } = req.body;
+    let items = req.body.items;
+
+    // Backward compatibility for single product payload
+    if (!items || !Array.isArray(items)) {
+      if (req.body.product_id && req.body.quantity) {
+        items = [{
+          product_id: req.body.product_id,
+          quantity: req.body.quantity,
+          cost_price: req.body.cost_price
+        }];
+      } else {
+        return res.status(400).json({ error: 'Valid products and quantities are required' });
+      }
     }
 
-    const product = db.prepare('SELECT * FROM products WHERE id = ?').get(product_id);
-    if (!product) {
-      return res.status(404).json({ error: 'Product not found' });
+    if (items.length === 0) {
+      return res.status(400).json({ error: 'At least one product item is required' });
     }
 
-    const qty = Number(quantity);
-    const newStock = product.stock + qty;
-    const newCost = cost_price !== undefined && cost_price !== '' ? Number(cost_price) : product.cost_price;
+    const supplier = supplier_name || 'Direct Vendor';
+    const invoice = invoice_no || '';
+    const note = notes || '';
 
-    const performStockIn = db.transaction(() => {
-      db.prepare(`
-        UPDATE products 
-        SET stock = ?, cost_price = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-      `).run(newStock, newCost, product_id);
+    const updateProductStmt = db.prepare(`
+      UPDATE products 
+      SET stock = stock + ?, 
+          cost_price = CASE WHEN ? > 0 THEN ? ELSE cost_price END,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
 
-      db.prepare(`
-        INSERT INTO stock_logs (product_id, change_type, quantity, cost_price, supplier_name, invoice_no, notes)
-        VALUES (?, 'STOCK_IN', ?, ?, ?, ?, ?)
-      `).run(product_id, qty, newCost, supplier_name || 'Vendor', invoice_no || '', notes || '');
+    const logStmt = db.prepare(`
+      INSERT INTO stock_logs (product_id, change_type, quantity, cost_price, supplier_name, invoice_no, notes)
+      VALUES (?, 'STOCK_IN', ?, ?, ?, ?, ?)
+    `);
+
+    const getProductStmt = db.prepare('SELECT * FROM products WHERE id = ?');
+    const updatedProducts = [];
+
+    const performStockInTx = db.transaction(() => {
+      for (const item of items) {
+        const prodId = Number(item.product_id);
+        const qty = Number(item.quantity);
+        if (!prodId || isNaN(qty) || qty <= 0) continue;
+
+        const currentProd = getProductStmt.get(prodId);
+        if (!currentProd) continue;
+
+        const newCost = (item.cost_price !== undefined && item.cost_price !== '' && Number(item.cost_price) >= 0)
+          ? Number(item.cost_price)
+          : currentProd.cost_price;
+
+        updateProductStmt.run(qty, newCost, newCost, prodId);
+        logStmt.run(prodId, qty, newCost, supplier, invoice, note);
+
+        const updated = getProductStmt.get(prodId);
+        updatedProducts.push(updated);
+      }
     });
 
-    performStockIn();
+    performStockInTx();
 
-    const updatedProduct = db.prepare('SELECT * FROM products WHERE id = ?').get(product_id);
-    res.json({ success: true, product: updatedProduct, newStock });
+    if (supplier && supplier.trim() !== '') {
+      try {
+        db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)').run(supplier.trim());
+      } catch (e) {}
+    }
+
+    res.json({
+      success: true,
+      message: `Stock updated successfully for ${updatedProducts.length} product(s)`,
+      updatedProducts
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/suppliers', (req, res) => {
+  try {
+    const suppliers = db.prepare(`
+      SELECT DISTINCT name FROM (
+        SELECT name FROM suppliers
+        UNION
+        SELECT supplier_name as name FROM stock_logs WHERE supplier_name IS NOT NULL AND supplier_name != ''
+      )
+      ORDER BY name ASC
+    `).all();
+    res.json(suppliers.map(s => s.name));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/suppliers', (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ error: 'Supplier name is required' });
+    }
+    const cleanName = name.trim();
+    db.prepare('INSERT OR IGNORE INTO suppliers (name, phone) VALUES (?, ?)').run(cleanName, phone || null);
+    
+    const all = db.prepare(`
+      SELECT DISTINCT name FROM (
+        SELECT name FROM suppliers
+        UNION
+        SELECT supplier_name as name FROM stock_logs WHERE supplier_name IS NOT NULL AND supplier_name != ''
+      )
+      ORDER BY name ASC
+    `).all();
+    res.json({ success: true, name: cleanName, suppliers: all.map(s => s.name) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -516,18 +598,124 @@ app.get('/api/analytics', (req, res) => {
     const profitMargin = revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0;
     const avgOrderValue = summary.total_orders > 0 ? (revenue / summary.total_orders).toFixed(1) : 0;
 
-    // Daily Sales Trend for chart
-    const salesTrend = db.prepare(`
+    // Dynamic Sales Trend based on chosen period
+    let salesTrend = [];
+    if (period === 'today') {
+      salesTrend = db.prepare(`
+        SELECT 
+          strftime('%H:00', created_at, 'localtime') as label,
+          COUNT(id) as orders_count,
+          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+        FROM orders
+        WHERE date(created_at, 'localtime') = date('now', 'localtime')
+        GROUP BY strftime('%H', created_at, 'localtime')
+        ORDER BY strftime('%H', created_at, 'localtime') ASC
+      `).all();
+    } else if (period === 'week') {
+      salesTrend = db.prepare(`
+        SELECT 
+          strftime('%Y-%m-%d', created_at, 'localtime') as date,
+          strftime('%d %b', created_at, 'localtime') as label,
+          COUNT(id) as orders_count,
+          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+        FROM orders
+        WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')
+        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
+        ORDER BY date ASC
+      `).all();
+    } else if (period === 'month') {
+      salesTrend = db.prepare(`
+        SELECT 
+          strftime('%Y-%m-%d', created_at, 'localtime') as date,
+          strftime('%d %b', created_at, 'localtime') as label,
+          COUNT(id) as orders_count,
+          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+        FROM orders
+        WHERE date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')
+        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
+        ORDER BY date ASC
+      `).all();
+    } else {
+      salesTrend = db.prepare(`
+        SELECT 
+          strftime('%Y-%m-%d', created_at, 'localtime') as date,
+          strftime('%d %b', created_at, 'localtime') as label,
+          COUNT(id) as orders_count,
+          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+        FROM orders
+        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
+        ORDER BY date ASC
+      `).all();
+    }
+
+    // Hourly distribution & Peak Hours calculation (8:00 AM - 10:00 PM)
+    const hourlyRaw = db.prepare(`
       SELECT 
-        strftime('%Y-%m-%d', created_at, 'localtime') as date,
-        strftime('%d %b', created_at, 'localtime') as label,
+        CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour_num,
         COUNT(id) as orders_count,
-        COALESCE(SUM(total_amount), 0) as revenue
+        ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
       FROM orders
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-29 days')
-      GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
-      ORDER BY date ASC
+      WHERE ${dateCondition === "date(created_at, 'localtime') = date('now', 'localtime')" ? "1=1" : dateCondition}
+      GROUP BY hour_num
+      ORDER BY hour_num ASC
     `).all();
+
+    const hoursMap = {};
+    hourlyRaw.forEach(h => { hoursMap[h.hour_num] = h; });
+
+    const hourlyDistribution = [];
+    for (let h = 8; h <= 22; h++) {
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const displayHour = h % 12 === 0 ? 12 : h % 12;
+      const label = `${displayHour} ${ampm}`;
+      const found = hoursMap[h];
+      hourlyDistribution.push({
+        hour: h,
+        label,
+        orders_count: found ? found.orders_count : 0,
+        revenue: found ? found.revenue : 0
+      });
+    }
+
+    const peakHour = hourlyDistribution.reduce((max, h) => (h.revenue > (max?.revenue || 0) ? h : max), hourlyDistribution[0]);
+
+    // Day of Week distribution & Peak Days calculation (Monday to Sunday)
+    const dowRaw = db.prepare(`
+      SELECT 
+        CAST(strftime('%w', created_at, 'localtime') AS INTEGER) as dow,
+        COUNT(id) as orders_count,
+        ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+      FROM orders
+      WHERE ${dateCondition === "date(created_at, 'localtime') = date('now', 'localtime')" ? "1=1" : dateCondition}
+      GROUP BY dow
+      ORDER BY dow ASC
+    `).all();
+
+    const daysInfo = [
+      { dow: 1, name: 'Monday', short: 'Mon' },
+      { dow: 2, name: 'Tuesday', short: 'Tue' },
+      { dow: 3, name: 'Wednesday', short: 'Wed' },
+      { dow: 4, name: 'Thursday', short: 'Thu' },
+      { dow: 5, name: 'Friday', short: 'Fri' },
+      { dow: 6, name: 'Saturday', short: 'Sat' },
+      { dow: 0, name: 'Sunday', short: 'Sun' },
+    ];
+
+    const dowMap = {};
+    dowRaw.forEach(d => { dowMap[d.dow] = d; });
+
+    const dayOfWeekDistribution = daysInfo.map(d => {
+      const found = dowMap[d.dow];
+      return {
+        day_index: d.dow,
+        day_name: d.name,
+        day_short: d.short,
+        orders_count: found ? found.orders_count : 0,
+        revenue: found ? found.revenue : 0
+      };
+    });
+
+    const peakDay = dayOfWeekDistribution.reduce((max, d) => (d.revenue > (max?.revenue || 0) ? d : max), dayOfWeekDistribution[0]);
 
     // Top Selling Products
     const topProducts = db.prepare(`
@@ -568,6 +756,71 @@ app.get('/api/analytics', (req, res) => {
       FROM products
     `).get();
 
+    // 1. Sales Growth Comparison with previous period
+    let prevCondition = "1=0";
+    if (period === 'today') {
+      prevCondition = "date(created_at, 'localtime') = date('now', 'localtime', '-1 day')";
+    } else if (period === 'week') {
+      prevCondition = "date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')";
+    } else if (period === 'month') {
+      prevCondition = "date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')";
+    }
+    const prevSummary = db.prepare(`SELECT COALESCE(SUM(total_amount), 0) as prev_revenue FROM orders WHERE ${prevCondition}`).get();
+    const prevRevenue = prevSummary ? prevSummary.prev_revenue : 0;
+    const growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+
+    // 2. Category-wise sales breakdown
+    const categorySalesRaw = db.prepare(`
+      SELECT 
+        COALESCE(p.category, 'General') as category,
+        COUNT(DISTINCT oi.order_id) as orders_count,
+        SUM(oi.quantity) as units_sold,
+        ROUND(SUM(oi.item_total), 2) as revenue
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN products p ON oi.product_id = p.id
+      WHERE ${dateCondition.replace(/created_at/g, 'o.created_at')}
+      GROUP BY category
+      ORDER BY revenue DESC
+    `).all();
+
+    const categorySales = categorySalesRaw.map(c => ({
+      ...c,
+      percent: revenue > 0 ? Number(((c.revenue / revenue) * 100).toFixed(1)) : 0
+    }));
+
+    // 3. Slow-moving / dead stock products
+    const slowProducts = db.prepare(`
+      SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.image_url,
+             COALESCE(SUM(oi.quantity), 0) as units_sold
+      FROM products p
+      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${dateCondition})
+      GROUP BY p.id
+      ORDER BY units_sold ASC, p.stock DESC
+      LIMIT 5
+    `).all();
+
+    // 4. Supplier / Wholesaler purchase spending analytics
+    const supplierSpending = db.prepare(`
+      SELECT 
+        COALESCE(supplier_name, 'Direct Wholesaler') as supplier,
+        COUNT(id) as delivery_count,
+        ROUND(SUM(quantity * cost_price), 2) as total_spent,
+        SUM(quantity) as total_units_received
+      FROM stock_logs
+      WHERE change_type = 'STOCK_IN' AND supplier_name IS NOT NULL AND supplier_name != ''
+      GROUP BY supplier
+      ORDER BY total_spent DESC
+      LIMIT 6
+    `).all();
+
+    // 5. Inventory turnover ratio & Days on hand
+    const inventoryVal = inventoryStats.inventory_valuation || 1;
+    const turnoverRatio = cost > 0 ? Number((cost / inventoryVal).toFixed(2)) : 0;
+    const periodDays = period === 'today' ? 1 : (period === 'week' ? 7 : (period === 'month' ? 30 : 90));
+    const dailyCost = cost / periodDays;
+    const daysOnHand = dailyCost > 0 ? Math.round(inventoryVal / dailyCost) : Math.round(inventoryVal / (cost || 1));
+
     res.json({
       period: period || 'all',
       summary: {
@@ -577,12 +830,26 @@ app.get('/api/analytics', (req, res) => {
         profit_margin: Number(profitMargin),
         total_savings: Number(summary.total_savings.toFixed(2)),
         avg_order_value: Number(avgOrderValue),
-        total_items_sold: costSummary.total_items_sold
+        total_items_sold: costSummary.total_items_sold,
+        prev_revenue: Number(prevRevenue.toFixed(2)),
+        growth_percent: growthPercent,
+        avg_items_per_order: summary.total_orders > 0 ? Number((costSummary.total_items_sold / summary.total_orders).toFixed(1)) : 0
       },
-      inventory: inventoryStats,
+      inventory: {
+        ...inventoryStats,
+        turnover_ratio: turnoverRatio,
+        days_on_hand: daysOnHand
+      },
       salesTrend,
       topProducts,
-      paymentMethods
+      slowProducts,
+      categorySales,
+      supplierSpending,
+      paymentMethods,
+      hourlyDistribution,
+      peakHour,
+      dayOfWeekDistribution,
+      peakDay
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

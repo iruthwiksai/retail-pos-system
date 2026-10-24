@@ -74,12 +74,32 @@ function initDatabase() {
       notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL,
+      phone TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   try {
     db.exec("ALTER TABLE products ADD COLUMN image_url TEXT");
   } catch (e) {
     // Column already exists
+  }
+
+  // Seed default suppliers
+  const defaultSuppliers = [
+    'Metro Cash & Carry Wholesale',
+    'Reliance Wholesale',
+    'Local Mandi / APMC Distributor',
+    'Hindustan Unilever Distributor',
+    'ITC Distribution Hub'
+  ];
+  const insertSupplier = db.prepare('INSERT OR IGNORE INTO suppliers (name) VALUES (?)');
+  for (const s of defaultSuppliers) {
+    insertSupplier.run(s);
   }
 
   // Initialize default settings if missing
