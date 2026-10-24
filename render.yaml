@@ -3,7 +3,7 @@ services:
     name: vijayalakshmi-minimart-pos
     runtime: node
     plan: free
-    buildCommand: npm run postinstall && npm run build
+    buildCommand: npm run postinstall
     startCommand: npm start
     envVars:
       - key: NODE_VERSION

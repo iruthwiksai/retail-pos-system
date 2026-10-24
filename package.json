@@ -4,8 +4,9 @@
   "description": "VijayaLakshmi Minimart - Retail POS, Billing, Inventory & Analytics System",
   "main": "backend/server.js",
   "scripts": {
-    "postinstall": "npm install --prefix backend && npm install --prefix frontend",
-    "build": "npm run build --prefix frontend",
+    "postinstall": "npm install --prefix backend",
+    "build": "echo 'Using pre-built production frontend'",
+    "build:all": "npm install --prefix backend && npm install --prefix frontend && npm run build --prefix frontend",
     "start": "node backend/server.js",
     "dev:backend": "cd backend && node server.js",
     "dev:frontend": "cd frontend && npm run dev",

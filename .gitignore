@@ -3,8 +3,8 @@ node_modules/
 backend/node_modules/
 frontend/node_modules/
 
-# Production build
-frontend/dist/
+# Production build (committed for instant 0-build Render deployment)
+# frontend/dist/
 
 # Database temporary WAL files
 backend/*.db-shm
