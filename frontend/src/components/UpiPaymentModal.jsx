@@ -25,8 +25,8 @@ export default function UpiPaymentModal({
   const upiName = settings.upi_name || settings.store_name || 'VijayaLakshmi Minimart';
   const currency = settings.currency_symbol || '₹';
 
-  // Construct UPI payment URI
-  const note = `Bill ${orderNumber || ''} ${customerPhone ? `(${customerPhone})` : ''}`.trim();
+  // Construct UPI payment URI (consistent store bill note)
+  const note = `${settings.store_name || 'VijayaLakshmi Minimart'} Bill ${customerPhone ? `(${customerPhone})` : ''}`.trim();
   const upiPayload = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(upiName)}&am=${totalAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
 
   const handleCopyUPI = () => {

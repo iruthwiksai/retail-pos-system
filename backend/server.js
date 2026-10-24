@@ -669,19 +669,29 @@ app.get('/api/orders/:id', (req, res) => {
 // ----------------- BUSINESS ANALYTICS API -----------------
 app.get('/api/analytics', (req, res) => {
   try {
-    const { period } = req.query; // 'today', 'week', 'month', 'all'
+    const { period, startDate, endDate } = req.query; // 'today', 'week', 'month', 'all', 'custom'
 
-    // Only count completed PAID orders for revenue and profit metrics
+    // 1. Build Condition for selected period (PAID orders only for revenue)
     let paidCondition = "payment_status = 'PAID'";
+    let periodLabel = 'Last 7 Days';
+
     if (period === 'today') {
       paidCondition += " AND date(created_at, 'localtime') = date('now', 'localtime')";
+      periodLabel = 'Today';
     } else if (period === 'week') {
       paidCondition += " AND date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')";
+      periodLabel = 'Last 7 Days';
     } else if (period === 'month') {
       paidCondition += " AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')";
+      periodLabel = 'This Month';
+    } else if (period === 'custom' && startDate && endDate) {
+      paidCondition += ` AND date(created_at, 'localtime') BETWEEN date('${startDate}') AND date('${endDate}')`;
+      periodLabel = `${startDate} to ${endDate}`;
+    } else {
+      periodLabel = 'All Time';
     }
 
-    // Summary Totals for Paid orders
+    // 2. Summary Totals for Paid orders in selected period
     const summary = db.prepare(`
       SELECT 
         COUNT(id) as total_orders,
@@ -690,15 +700,6 @@ app.get('/api/analytics', (req, res) => {
         COALESCE(SUM(total_savings), 0) as total_savings
       FROM orders
       WHERE ${paidCondition}
-    `).get();
-
-    // Unpaid credit / Udhaar tracking
-    const unpaidStats = db.prepare(`
-      SELECT 
-        COUNT(id) as unpaid_orders_count,
-        COALESCE(SUM(total_amount), 0) as unpaid_credit_amount
-      FROM orders
-      WHERE payment_status = 'UNPAID'
     `).get();
 
     // Cost & Profit calculation for Paid orders
@@ -713,37 +714,119 @@ app.get('/api/analytics', (req, res) => {
 
     const revenue = summary.total_revenue;
     const cost = costSummary.total_cost;
-    // Real profit calculation (no Math.max(0, ...) clamp so negative profits / losses are visible)
-    const profit = Number((revenue - cost).toFixed(2));
-    const profitMargin = revenue > 0 ? Number(((profit / revenue) * 100).toFixed(1)) : 0;
+    const grossProfit = Number((revenue - cost).toFixed(2));
+    const profitMargin = revenue > 0 ? Number(((grossProfit / revenue) * 100).toFixed(1)) : 0;
     const avgOrderValue = summary.total_orders > 0 ? Number((revenue / summary.total_orders).toFixed(1)) : 0;
 
-    // Dynamic Sales Trend based on chosen period (Paid orders only)
-    let salesTrend = [];
+    // 3. Sales Growth Comparison with previous period (null for 'all' to prevent misleading +100%)
+    let prevRevenue = null;
+    let growthPercent = null;
+
     if (period === 'today') {
-      salesTrend = db.prepare(`
+      const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')").get();
+      prevRevenue = prev.rev;
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+    } else if (period === 'week') {
+      const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')").get();
+      prevRevenue = prev.rev;
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+    } else if (period === 'month') {
+      const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')").get();
+      prevRevenue = prev.rev;
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+    }
+
+    // 4. Trend Data with Missing Date Filling (No Gaps in Trend!)
+    let salesTrend = [];
+
+    if (period === 'today') {
+      // 7 AM to 10 PM hourly breakdown for today
+      const rawHourly = db.prepare(`
         SELECT 
-          strftime('%H:00', created_at, 'localtime') as label,
+          CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour,
           COUNT(id) as orders_count,
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
         WHERE ${paidCondition}
-        GROUP BY strftime('%H', created_at, 'localtime')
-        ORDER BY strftime('%H', created_at, 'localtime') ASC
+        GROUP BY hour
       `).all();
-    } else if (period === 'week' || period === 'month') {
-      salesTrend = db.prepare(`
+
+      const hourlyMap = {};
+      rawHourly.forEach(h => { hourlyMap[h.hour] = h; });
+
+      for (let h = 7; h <= 22; h++) {
+        const found = hourlyMap[h];
+        salesTrend.push({
+          hour: h,
+          label: `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? 'PM' : 'AM'}`,
+          orders_count: found ? found.orders_count : 0,
+          revenue: found ? found.revenue : 0
+        });
+      }
+    } else if (period === 'week') {
+      // Fill all 7 days from T-6 to T
+      const rawDaily = db.prepare(`
         SELECT 
-          strftime('%Y-%m-%d', created_at, 'localtime') as date,
-          strftime('%d %b', created_at, 'localtime') as label,
+          strftime('%Y-%m-%d', created_at, 'localtime') as date_str,
           COUNT(id) as orders_count,
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
         WHERE ${paidCondition}
-        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
-        ORDER BY date ASC
+        GROUP BY date_str
       `).all();
+
+      const dailyMap = {};
+      rawDaily.forEach(d => { dailyMap[d.date_str] = d; });
+
+      // Generate 7 consecutive dates in IST
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(Date.now() + 5.5 * 60 * 60 * 1000 - i * 24 * 60 * 60 * 1000);
+        const dateStr = d.toISOString().slice(0, 10);
+        const dayLabel = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        const found = dailyMap[dateStr];
+
+        salesTrend.push({
+          date: dateStr,
+          label: dayLabel,
+          orders_count: found ? found.orders_count : 0,
+          revenue: found ? found.revenue : 0
+        });
+      }
+    } else if (period === 'month') {
+      // Fill all days from 1st of month to today
+      const rawDaily = db.prepare(`
+        SELECT 
+          strftime('%Y-%m-%d', created_at, 'localtime') as date_str,
+          COUNT(id) as orders_count,
+          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+        FROM orders
+        WHERE ${paidCondition}
+        GROUP BY date_str
+      `).all();
+
+      const dailyMap = {};
+      rawDaily.forEach(d => { dailyMap[d.date_str] = d; });
+
+      const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      const currentDayOfMonth = nowIST.getDate();
+      const year = nowIST.getFullYear();
+      const month = nowIST.getMonth();
+
+      for (let day = 1; day <= currentDayOfMonth; day++) {
+        const d = new Date(Date.UTC(year, month, day));
+        const dateStr = d.toISOString().slice(0, 10);
+        const dayLabel = d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+        const found = dailyMap[dateStr];
+
+        salesTrend.push({
+          date: dateStr,
+          label: dayLabel,
+          orders_count: found ? found.orders_count : 0,
+          revenue: found ? found.revenue : 0
+        });
+      }
     } else {
+      // All time / custom range grouped by date
       salesTrend = db.prepare(`
         SELECT 
           strftime('%Y-%m-%d', created_at, 'localtime') as date,
@@ -752,12 +835,61 @@ app.get('/api/analytics', (req, res) => {
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
         WHERE ${paidCondition}
-        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
+        GROUP BY date
         ORDER BY date ASC
       `).all();
     }
 
-    // Hourly distribution & Peak Hours calculation (8:00 AM - 10:00 PM in IST)
+    // 5. Day × Hour Heatmap (7 rows by hours 7 to 22)
+    const heatmapRaw = db.prepare(`
+      SELECT 
+        CAST(strftime('%w', created_at, 'localtime') AS INTEGER) as day_index,
+        CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour,
+        COUNT(id) as bills_count,
+        ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
+      FROM orders
+      WHERE payment_status = 'PAID'
+      GROUP BY day_index, hour
+    `).all();
+
+    const heatmapMap = {};
+    let maxHeatmapBills = 1;
+    heatmapRaw.forEach(item => {
+      heatmapMap[`${item.day_index}-${item.hour}`] = item;
+      if (item.bills_count > maxHeatmapBills) maxHeatmapBills = item.bills_count;
+    });
+
+    const heatmapDays = [
+      { day_index: 1, name: 'Monday', short: 'Mon' },
+      { day_index: 2, name: 'Tuesday', short: 'Tue' },
+      { day_index: 3, name: 'Wednesday', short: 'Wed' },
+      { day_index: 4, name: 'Thursday', short: 'Thu' },
+      { day_index: 5, name: 'Friday', short: 'Fri' },
+      { day_index: 6, name: 'Saturday', short: 'Sat' },
+      { day_index: 0, name: 'Sunday', short: 'Sun' }
+    ];
+
+    const heatmapHours = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22];
+
+    const heatmap = heatmapDays.map(d => {
+      const hours = heatmapHours.map(h => {
+        const cell = heatmapMap[`${d.day_index}-${h}`];
+        return {
+          hour: h,
+          label: `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? 'PM' : 'AM'}`,
+          bills_count: cell ? cell.bills_count : 0,
+          revenue: cell ? cell.revenue : 0
+        };
+      });
+      return {
+        day_index: d.day_index,
+        day_name: d.name,
+        day_short: d.short,
+        hours
+      };
+    });
+
+    // 6. Dynamic Hourly Footfall (Bills count) & Revenue Peak
     const hourlyRaw = db.prepare(`
       SELECT 
         CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour_num,
@@ -772,23 +904,28 @@ app.get('/api/analytics', (req, res) => {
     const hoursMap = {};
     hourlyRaw.forEach(h => { hoursMap[h.hour_num] = h; });
 
+    // Expand hours if sales occur outside 8-22
+    const minSaleHour = hourlyRaw.length > 0 ? Math.min(7, Math.min(...hourlyRaw.map(h => h.hour_num))) : 7;
+    const maxSaleHour = hourlyRaw.length > 0 ? Math.max(22, Math.max(...hourlyRaw.map(h => h.hour_num))) : 22;
+
     const hourlyDistribution = [];
-    for (let h = 8; h <= 22; h++) {
+    for (let h = minSaleHour; h <= maxSaleHour; h++) {
       const ampm = h >= 12 ? 'PM' : 'AM';
       const displayHour = h % 12 === 0 ? 12 : h % 12;
-      const label = `${displayHour} ${ampm}`;
       const found = hoursMap[h];
       hourlyDistribution.push({
         hour: h,
-        label,
+        label: `${displayHour} ${ampm}`,
         orders_count: found ? found.orders_count : 0,
         revenue: found ? found.revenue : 0
       });
     }
 
-    const peakHour = hourlyDistribution.reduce((max, h) => (h.revenue > (max?.revenue || 0) ? h : max), hourlyDistribution[0]);
+    // Peak Footfall ranks by bills/orders count, Peak Revenue ranks by sales amount
+    const peakFootfallHour = hourlyDistribution.reduce((max, h) => (h.orders_count > (max?.orders_count || 0) ? h : max), hourlyDistribution[0]);
+    const peakRevenueHour = hourlyDistribution.reduce((max, h) => (h.revenue > (max?.revenue || 0) ? h : max), hourlyDistribution[0]);
 
-    // Day of Week distribution & Peak Days calculation (Monday to Sunday)
+    // 7. Day of Week distribution (Monday to Sunday)
     const dowRaw = db.prepare(`
       SELECT 
         CAST(strftime('%w', created_at, 'localtime') AS INTEGER) as dow,
@@ -800,23 +937,13 @@ app.get('/api/analytics', (req, res) => {
       ORDER BY dow ASC
     `).all();
 
-    const daysInfo = [
-      { dow: 1, name: 'Monday', short: 'Mon' },
-      { dow: 2, name: 'Tuesday', short: 'Tue' },
-      { dow: 3, name: 'Wednesday', short: 'Wed' },
-      { dow: 4, name: 'Thursday', short: 'Thu' },
-      { dow: 5, name: 'Friday', short: 'Fri' },
-      { dow: 6, name: 'Saturday', short: 'Sat' },
-      { dow: 0, name: 'Sunday', short: 'Sun' },
-    ];
-
     const dowMap = {};
     dowRaw.forEach(d => { dowMap[d.dow] = d; });
 
-    const dayOfWeekDistribution = daysInfo.map(d => {
-      const found = dowMap[d.dow];
+    const dayOfWeekDistribution = heatmapDays.map(d => {
+      const found = dowMap[d.day_index];
       return {
-        day_index: d.dow,
+        day_index: d.day_index,
         day_name: d.name,
         day_short: d.short,
         orders_count: found ? found.orders_count : 0,
@@ -824,9 +951,10 @@ app.get('/api/analytics', (req, res) => {
       };
     });
 
-    const peakDay = dayOfWeekDistribution.reduce((max, d) => (d.revenue > (max?.revenue || 0) ? d : max), dayOfWeekDistribution[0]);
+    const peakDay = dayOfWeekDistribution.reduce((max, d) => (d.orders_count > (max?.orders_count || 0) ? d : max), dayOfWeekDistribution[0]);
+    const peakRevenueDay = dayOfWeekDistribution.reduce((max, d) => (d.revenue > (max?.revenue || 0) ? d : max), dayOfWeekDistribution[0]);
 
-    // Top Selling Products (from Paid orders)
+    // 8. Top Selling Products (Ranked by revenue & quantity)
     const topProducts = db.prepare(`
       SELECT 
         oi.product_name,
@@ -843,8 +971,50 @@ app.get('/api/analytics', (req, res) => {
       LIMIT 10
     `).all();
 
-    // Payment methods distribution (shows Cash, UPI, Card and unpaid credit breakdown)
-    const paymentMethods = db.prepare(`
+    // 9. Slow-moving Products with stock velocity and days of stock left
+    const slowProducts = db.prepare(`
+      SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.cost_price, p.low_stock_threshold,
+             COALESCE(SUM(oi.quantity), 0) as units_sold
+      FROM products p
+      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${paidCondition})
+      WHERE COALESCE(p.is_active, 1) = 1
+      GROUP BY p.id
+      ORDER BY units_sold ASC, p.stock DESC
+      LIMIT 6
+    `).all().map(p => {
+      const velocity = p.units_sold / 30; // approx per day
+      const daysOfStock = velocity > 0 ? Math.round(p.stock / velocity) : 999;
+      return {
+        ...p,
+        days_of_stock: daysOfStock,
+        needs_reorder: p.stock <= (p.low_stock_threshold || 5)
+      };
+    });
+
+    // 10. Category-wise sales sorted by revenue with Margin %
+    const categorySalesRaw = db.prepare(`
+      SELECT 
+        COALESCE(p.category, 'General') as category,
+        COUNT(DISTINCT oi.order_id) as orders_count,
+        SUM(oi.quantity) as units_sold,
+        ROUND(SUM(oi.item_total), 2) as revenue,
+        ROUND(SUM(oi.item_total - (oi.cost_price * oi.quantity)), 2) as category_profit
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      LEFT JOIN products p ON oi.product_id = p.id
+      WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
+      GROUP BY category
+      ORDER BY revenue DESC
+    `).all();
+
+    const categorySales = categorySalesRaw.map(c => ({
+      ...c,
+      percent: revenue > 0 ? Number(((c.revenue / revenue) * 100).toFixed(1)) : 0,
+      margin_percent: c.revenue > 0 ? Number(((c.category_profit / c.revenue) * 100).toFixed(1)) : 0
+    }));
+
+    // 11. Payment Methods with fixed colors & consistency
+    const paymentMethodsRaw = db.prepare(`
       SELECT 
         payment_method,
         COUNT(id) as count,
@@ -854,7 +1024,106 @@ app.get('/api/analytics', (req, res) => {
       GROUP BY payment_method
     `).all();
 
-    // Inventory status summary
+    const PAYMENT_COLORS = {
+      'UPI': '#2563EB',    // Blue
+      'CASH': '#059669',   // Emerald
+      'CARD': '#7C3AED',   // Purple
+      'CREDIT': '#D97706'  // Amber
+    };
+
+    const paymentMethods = paymentMethodsRaw.map(pm => ({
+      ...pm,
+      color: PAYMENT_COLORS[pm.payment_method] || '#64748B',
+      percent: revenue > 0 ? Number(((pm.total_amount / revenue) * 100).toFixed(1)) : 0
+    }));
+
+    // 12. Udhaar (Credit) Aging Buckets & Customer Accounts
+    const udhaarRows = db.prepare(`
+      SELECT 
+        id,
+        order_number,
+        COALESCE(NULLIF(customer_name, ''), 'Walk-in Customer') as customer_name,
+        COALESCE(customer_phone, '') as customer_phone,
+        total_amount,
+        created_at,
+        CAST(julianday('now', 'localtime') - julianday(created_at, 'localtime') AS INTEGER) as age_days
+      FROM orders
+      WHERE payment_status = 'UNPAID'
+      ORDER BY created_at ASC
+    `).all();
+
+    let aging_0_7 = 0;
+    let aging_8_30 = 0;
+    let aging_30_plus = 0;
+    const udhaarCustomerMap = {};
+
+    udhaarRows.forEach(r => {
+      const key = `${r.customer_name}_${r.customer_phone}`;
+      if (!udhaarCustomerMap[key]) {
+        udhaarCustomerMap[key] = {
+          customer_name: r.customer_name,
+          customer_phone: r.customer_phone,
+          total_balance: 0,
+          bills_count: 0,
+          oldest_bill_date: r.created_at,
+          max_age_days: r.age_days
+        };
+      }
+      udhaarCustomerMap[key].total_balance += r.total_amount;
+      udhaarCustomerMap[key].bills_count += 1;
+
+      if (r.age_days <= 7) aging_0_7 += r.total_amount;
+      else if (r.age_days <= 30) aging_8_30 += r.total_amount;
+      else aging_30_plus += r.total_amount;
+    });
+
+    const udhaarCustomers = Object.values(udhaarCustomerMap).sort((a, b) => b.total_balance - a.total_balance);
+
+    // 13. "Today at a Glance" Live Metrics (Regardless of period tab)
+    const todayStats = db.prepare(`
+      SELECT 
+        COUNT(id) as today_orders,
+        COALESCE(SUM(total_amount), 0) as today_revenue
+      FROM orders 
+      WHERE payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime')
+    `).get();
+
+    const yesterdayStats = db.prepare(`
+      SELECT 
+        COALESCE(SUM(total_amount), 0) as yesterday_revenue
+      FROM orders 
+      WHERE payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')
+    `).get();
+
+    const todayCost = db.prepare(`
+      SELECT COALESCE(SUM(oi.cost_price * oi.quantity), 0) as today_cost
+      FROM order_items oi
+      JOIN orders o ON oi.order_id = o.id
+      WHERE o.payment_status = 'PAID' AND date(o.created_at, 'localtime') = date('now', 'localtime')
+    `).get().today_cost;
+
+    const todayGrossProfit = Number((todayStats.today_revenue - todayCost).toFixed(2));
+    const todayMargin = todayStats.today_revenue > 0 ? Number(((todayGrossProfit / todayStats.today_revenue) * 100).toFixed(1)) : 0;
+    const todayGrowth = yesterdayStats.yesterday_revenue > 0
+      ? Number((((todayStats.today_revenue - yesterdayStats.yesterday_revenue) / yesterdayStats.yesterday_revenue) * 100).toFixed(1))
+      : null;
+
+    const todayPayments = db.prepare(`
+      SELECT payment_method, COALESCE(SUM(total_amount), 0) as amount
+      FROM orders
+      WHERE payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime')
+      GROUP BY payment_method
+    `).all();
+    const todayCash = (todayPayments.find(p => p.payment_method === 'CASH')?.amount) || 0;
+    const todayUpi = (todayPayments.find(p => p.payment_method === 'UPI')?.amount) || 0;
+
+    const todayUdhaar = db.prepare(`
+      SELECT COALESCE(SUM(total_amount), 0) as amount, COUNT(id) as count
+      FROM orders
+      WHERE payment_status = 'UNPAID' AND date(created_at, 'localtime') = date('now', 'localtime')
+    `).get();
+
+    // 14. Inventory Health & Wholesalers
     const inventoryStats = db.prepare(`
       SELECT 
         COUNT(id) as total_sku_count,
@@ -866,52 +1135,6 @@ app.get('/api/analytics', (req, res) => {
       WHERE COALESCE(is_active, 1) = 1
     `).get();
 
-    // 1. Sales Growth Comparison with previous period (Paid orders only)
-    let prevCondition = "payment_status = 'PAID' AND 1=0";
-    if (period === 'today') {
-      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')";
-    } else if (period === 'week') {
-      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')";
-    } else if (period === 'month') {
-      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')";
-    }
-    const prevSummary = db.prepare(`SELECT COALESCE(SUM(total_amount), 0) as prev_revenue FROM orders WHERE ${prevCondition}`).get();
-    const prevRevenue = prevSummary ? prevSummary.prev_revenue : 0;
-    const growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
-
-    // 2. Category-wise sales breakdown (Paid orders only)
-    const categorySalesRaw = db.prepare(`
-      SELECT 
-        COALESCE(p.category, 'General') as category,
-        COUNT(DISTINCT oi.order_id) as orders_count,
-        SUM(oi.quantity) as units_sold,
-        ROUND(SUM(oi.item_total), 2) as revenue
-      FROM order_items oi
-      JOIN orders o ON oi.order_id = o.id
-      LEFT JOIN products p ON oi.product_id = p.id
-      WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
-      GROUP BY category
-      ORDER BY revenue DESC
-    `).all();
-
-    const categorySales = categorySalesRaw.map(c => ({
-      ...c,
-      percent: revenue > 0 ? Number(((c.revenue / revenue) * 100).toFixed(1)) : 0
-    }));
-
-    // 3. Slow-moving / dead stock products
-    const slowProducts = db.prepare(`
-      SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.image_url,
-             COALESCE(SUM(oi.quantity), 0) as units_sold
-      FROM products p
-      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${paidCondition})
-      WHERE COALESCE(p.is_active, 1) = 1
-      GROUP BY p.id
-      ORDER BY units_sold ASC, p.stock DESC
-      LIMIT 5
-    `).all();
-
-    // 4. Supplier / Wholesaler purchase spending analytics
     const supplierSpending = db.prepare(`
       SELECT 
         COALESCE(supplier_name, 'Direct Wholesaler') as supplier,
@@ -925,7 +1148,6 @@ app.get('/api/analytics', (req, res) => {
       LIMIT 6
     `).all();
 
-    // 5. Inventory turnover ratio & Days on hand
     const inventoryVal = inventoryStats.inventory_valuation || 1;
     const turnoverRatio = cost > 0 ? Number((cost / inventoryVal).toFixed(2)) : 0;
     const periodDays = period === 'today' ? 1 : (period === 'week' ? 7 : (period === 'month' ? 30 : 90));
@@ -933,20 +1155,38 @@ app.get('/api/analytics', (req, res) => {
     const daysOnHand = dailyCost > 0 ? Math.round(inventoryVal / dailyCost) : Math.round(inventoryVal / (cost || 1));
 
     res.json({
-      period: period || 'all',
+      period: period || 'week',
+      periodLabel,
+      todayAtAGlance: {
+        today_revenue: Number(todayStats.today_revenue.toFixed(2)),
+        yesterday_revenue: Number(yesterdayStats.yesterday_revenue.toFixed(2)),
+        today_growth_percent: todayGrowth,
+        today_orders: todayStats.today_orders,
+        today_gross_profit: todayGrossProfit,
+        today_margin: todayMargin,
+        today_cash: Number(todayCash.toFixed(2)),
+        today_upi: Number(todayUpi.toFixed(2)),
+        today_udhaar_amount: Number(todayUdhaar.amount.toFixed(2)),
+        today_udhaar_count: todayUdhaar.count
+      },
       summary: {
         total_orders: summary.total_orders,
         total_revenue: Number(revenue.toFixed(2)),
-        total_profit: Number(profit.toFixed(2)),
-        profit_margin: Number(profitMargin),
+        gross_profit: grossProfit,
+        profit_margin: profitMargin,
         total_savings: Number(summary.total_savings.toFixed(2)),
-        avg_order_value: Number(avgOrderValue),
+        avg_order_value: avgOrderValue,
         total_items_sold: costSummary.total_items_sold,
-        prev_revenue: Number(prevRevenue.toFixed(2)),
+        prev_revenue: prevRevenue !== null ? Number(prevRevenue.toFixed(2)) : null,
         growth_percent: growthPercent,
-        avg_items_per_order: summary.total_orders > 0 ? Number((costSummary.total_items_sold / summary.total_orders).toFixed(1)) : 0,
-        unpaid_credit_orders: unpaidStats.unpaid_orders_count || 0,
-        unpaid_credit_amount: Number((unpaidStats.unpaid_credit_amount || 0).toFixed(2))
+        avg_items_per_order: summary.total_orders > 0 ? Number((costSummary.total_items_sold / summary.total_orders).toFixed(1)) : 0
+      },
+      udhaar: {
+        total_outstanding: Number((aging_0_7 + aging_8_30 + aging_30_plus).toFixed(2)),
+        aging_0_7: Number(aging_0_7.toFixed(2)),
+        aging_8_30: Number(aging_8_30.toFixed(2)),
+        aging_30_plus: Number(aging_30_plus.toFixed(2)),
+        customers: udhaarCustomers
       },
       inventory: {
         ...inventoryStats,
@@ -954,15 +1194,21 @@ app.get('/api/analytics', (req, res) => {
         days_on_hand: daysOnHand
       },
       salesTrend,
+      heatmap: {
+        max_bills: maxHeatmapBills,
+        data: heatmap
+      },
       topProducts,
       slowProducts,
       categorySales,
       supplierSpending,
       paymentMethods,
       hourlyDistribution,
-      peakHour,
+      peakFootfallHour,
+      peakRevenueHour,
       dayOfWeekDistribution,
-      peakDay
+      peakDay,
+      peakRevenueDay
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
