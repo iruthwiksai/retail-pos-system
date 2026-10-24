@@ -11,6 +11,9 @@
     "dev:frontend": "cd frontend && npm run dev",
     "seed": "cd backend && node seed_sales.js"
   },
+  "engines": {
+    "node": ">=20.0.0 <21.0.0"
+  },
   "keywords": [
     "pos",
     "retail",
