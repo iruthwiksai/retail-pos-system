@@ -1,31 +1,31 @@
-# SmartMart Retail POS, Inventory & Business Analytics System 🛒
+# VijayaLakshmi Minimart — Retail POS, Inventory & Business Analytics System 🛒
 
 A complete, lightweight **Point of Sale (POS), Inventory Control, and Daily/Weekly/Monthly Business Analytics System** designed specifically for small grocery stores, kirana shops, and mini-supermarkets.
 
-Featuring a **DMart-style billing receipt format**, real-time **Dynamic UPI QR Code generation**, and permanent order archiving with **WhatsApp digital bill sharing** (no thermal printer hardware required).
+Featuring a **retail cash memo receipt format**, real-time **Dynamic UPI QR Code generation**, MRP-based **customer savings calculation**, Udhaar/credit management, and permanent order archiving with **WhatsApp digital bill sharing** (no thermal printer hardware required).
 
 ---
 
 ## 🌟 Key Features
 
-### 1. ⚡ Fast Cashier Billing Counter (DMart Style)
+### 1. ⚡ Fast Cashier Billing Counter
 - **Keyboard-First Workflow**: Use `F2` to jump to search/barcode scan, `Enter` to add to cart, and `F8` to finalize checkout.
 - **Loose & Packaged Goods**: Supports standard items (`pcs`, `pkt`, `box`) and loose items sold by weight (`kg`, `g`, `ltr`).
-- **DMart Savings Calculation**: Automatically compares MRP vs. Store Selling Rate and highlights:
-  > **"🎉 Customer Total Savings: ₹XXX.XX (XX% OFF)"**
-- **Automatic Order ID**: Sequenced daily invoice format (e.g. `DM-20261013-0001`).
+- **Real MRP Savings Calculation**: Automatically compares MRP vs. Store Selling Rate and calculates:
+  > **"🎉 Customer Total Savings: ₹XXX.XX"**
+- **Automatic Order ID**: Sequenced daily invoice format (e.g. `VL-20261024-0001`).
 
 ### 2. 📱 Dynamic UPI QR Code Generation & Checkout
 - **Instant Customer UPI QR**: Generates dynamic Indian UPI payment QR code (`upi://pay?pa=...&am=...&pn=...`) with the exact payable amount and invoice number.
 - **Customer Scans Directly**: Supports Google Pay, PhonePe, Paytm, BHIM, and Cred.
-- **Multi-Method Support**: Toggle easily between **UPI QR**, **Cash** (with quick tender buttons and automatic change calculator), and **Card/POS Terminal**.
-- **Configurable UPI ID**: Set your shop's UPI VPA in Settings (e.g. `yourstore@okaxis`).
+- **Multi-Method Support**: Toggle easily between **UPI QR**, **Cash** (with quick tender buttons and automatic change calculator), **Card**, and **Udhaar / Credit**.
+- **Configurable UPI ID**: Set your shop's UPI VPA in Settings (e.g. `vijayalakshmi@upi`).
 
-### 3. 🧾 DMart-Style Digital Bills ("Save for Later" & WhatsApp Sharing)
+### 3. 🧾 Digital Bills ("Save for Later" & WhatsApp Sharing)
 - **No Thermal Machine Needed**: Since small shops don't always have expensive thermal hardware, bills are saved permanently in the local SQLite database.
 - **1-Click WhatsApp Bill**: Sends a formatted, itemized digital receipt directly to the customer's WhatsApp (`https://wa.me/91...`).
-- **Print / Save as PDF**: Clean, printer-ready receipt slip layout for standard A4 or slip printing.
-- **Bills History**: Search, filter, and review any past bill by invoice ID, date, customer name, or phone.
+- **Print / Save as PDF**: Clean, printer-ready receipt slip layout with customer savings breakdown.
+- **Bills History**: Search, filter, and review any past bill by invoice ID, date, customer name, or phone. Settle unpaid Udhaar bills directly.
 
 ### 4. 📦 Inventory & Stock Management
 - **Incoming Stock Entry (Stock-In)**: Log new stock deliveries from suppliers with vendor name, invoice number, and purchase cost.
@@ -33,18 +33,18 @@ Featuring a **DMart-style billing receipt format**, real-time **Dynamic UPI QR C
 - **Stock Valuation**: Shows total capital invested at cost price and retail potential.
 - **Stock Movement Logs**: Complete audit trail of stock received vs sold in customer orders.
 
-### 5. 📊 Business Analytics (Daily, Weekly, Monthly)
+### 5. 📊 Business Intelligence & Analytics (15 Core Retail KPIs)
 - **Time Filters**: Inspect **Today (Daily)**, **Last 7 Days (Weekly)**, **This Month (Monthly)**, or **All Time**.
-- **Key Financial KPIs**:
-  - Gross Sales Revenue
-  - Estimated Net Profit & Profit Margin %
-  - Total Invoices / Billed Orders
-  - Average Basket Size (Ticket Size)
-  - Total Customer Savings Provided
-- **Interactive Visualizations**:
-  - Daily Revenue Trend Area Chart
-  - Payment Method Breakdown (UPI vs Cash vs Card)
-  - Top 10 Best-Selling Products by units and revenue
+- **Executive Overview & Deep Dives**:
+  - Gross Sales Revenue & Growth % vs previous period
+  - True Net Profit & Gross Profit Margin %
+  - Average Order Value & Basket Size (Units per Bill)
+  - Peak Footfall Hours (8:00 AM – 10:00 PM) & Peak Sales Days
+  - Category-Wise Revenue & Volume Breakdown
+  - Best-Selling Fast Movers vs. Slow-Moving Dead Stock Alerts
+  - Inventory Turnover Ratio & Days on Hand
+  - Wholesaler & Supplier Purchase Spending Analytics
+  - Payment Method Breakdown (Cash vs UPI vs Card) & Outstanding Udhaar Credit Tracking
 - **CSV Data Export**: Export daily/monthly sales data with one click for accounting.
 
 ---

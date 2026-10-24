@@ -145,6 +145,7 @@ export default function PosBilling({
             barcode: product.barcode,
             unit: product.unit || 'pcs',
             selling_price: product.selling_price,
+            mrp: product.mrp || product.selling_price,
             cost_price: product.cost_price,
             image_url: product.image_url || DEFAULT_IMG,
             quantity: product.unit === 'kg' ? 1 : 1
@@ -270,8 +271,10 @@ export default function PosBilling({
     return p.name.toLowerCase().includes(term) || (p.barcode && p.barcode.toLowerCase().includes(term));
   });
 
-  // Cart Totals - Pure Simple Rate * Quantity (No discounts, no savings)
+  // Cart Totals with accurate MRP savings calculation
   const grandTotal = cart.reduce((acc, item) => acc + item.selling_price * item.quantity, 0);
+  const totalMrp = cart.reduce((acc, item) => acc + (item.mrp || item.selling_price) * item.quantity, 0);
+  const totalSavings = Math.max(0, totalMrp - grandTotal);
   const totalItemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   // Dynamic Out of Stock count based on real available stock
@@ -534,17 +537,25 @@ export default function PosBilling({
 
             {/* Bill Summary */}
             {cart.length > 0 && (
-              <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-3.5">
-                <div className="flex items-baseline justify-between">
-                  <div>
-                    <span className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">
-                      Total Payable
-                    </span>
-                    <div className="text-sm sm:text-base text-slate-700 font-extrabold">{totalItemsCount} total units</div>
+              <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
+                <div className="space-y-1">
+                  <div className="flex items-baseline justify-between">
+                    <div>
+                      <span className="text-xs uppercase font-extrabold text-slate-500 tracking-wider">
+                        Total Payable
+                      </span>
+                      <div className="text-sm sm:text-base text-slate-700 font-extrabold">{totalItemsCount} total units</div>
+                    </div>
+                    <div className="text-3xl sm:text-4xl font-black text-emerald-800">
+                      {currency}{grandTotal.toFixed(2)}
+                    </div>
                   </div>
-                  <div className="text-3xl sm:text-4xl font-black text-emerald-800">
-                    {currency}{grandTotal.toFixed(2)}
-                  </div>
+                  {totalSavings > 0 && (
+                    <div className="flex items-center justify-between text-xs font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2.5 py-1 rounded-lg">
+                      <span>Customer Savings (MRP):</span>
+                      <span>🎉 {currency}{totalSavings.toFixed(2)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <button

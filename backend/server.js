@@ -1,3 +1,5 @@
+process.env.TZ = process.env.TZ || 'Asia/Kolkata';
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -10,11 +12,30 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Helper to get today's date string in IST format (YYYYMMDD)
+function getTodayISTDateStr() {
+  const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+  return nowIST.toISOString().slice(0, 10).replace(/-/g, '');
+}
+
 // Helper to generate formatted Order ID (VijayaLakshmi Minimart: VL-YYYYMMDD-XXXX)
 function generateOrderNumber(offset = 0) {
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const countRow = db.prepare("SELECT COUNT(*) as count FROM orders WHERE date(created_at, 'localtime') = date('now', 'localtime')").get();
-  const seq = String(countRow.count + 1 + offset).padStart(4, '0');
+  const dateStr = getTodayISTDateStr();
+  const latestOrder = db.prepare(`
+    SELECT order_number FROM orders 
+    WHERE order_number LIKE ? 
+    ORDER BY id DESC LIMIT 1
+  `).get(`VL-${dateStr}-%`);
+
+  let nextSeq = 1;
+  if (latestOrder && latestOrder.order_number) {
+    const parts = latestOrder.order_number.split('-');
+    const lastNum = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(lastNum)) {
+      nextSeq = lastNum + 1;
+    }
+  }
+  const seq = String(nextSeq + offset).padStart(4, '0');
   return `VL-${dateStr}-${seq}`;
 }
 
@@ -108,7 +129,7 @@ app.post('/api/settings', (req, res) => {
 app.get('/api/products', (req, res) => {
   try {
     const { q, category, low_stock } = req.query;
-    let query = 'SELECT * FROM products WHERE 1=1';
+    let query = 'SELECT * FROM products WHERE COALESCE(is_active, 1) = 1';
     const params = [];
 
     if (q) {
@@ -135,7 +156,7 @@ app.get('/api/products', (req, res) => {
 
 app.get('/api/products/categories', (req, res) => {
   try {
-    const categories = db.prepare('SELECT DISTINCT category FROM products ORDER BY category ASC').all();
+    const categories = db.prepare('SELECT DISTINCT category FROM products WHERE COALESCE(is_active, 1) = 1 ORDER BY category ASC').all();
     res.json(categories.map(c => c.category));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -218,8 +239,19 @@ app.put('/api/products/:id', (req, res) => {
 app.delete('/api/products/:id', (req, res) => {
   try {
     const { id } = req.params;
-    db.prepare('DELETE FROM products WHERE id = ?').run(id);
-    res.json({ success: true, message: 'Product deleted successfully' });
+    const salesCountRow = db.prepare('SELECT COUNT(*) as count FROM order_items WHERE product_id = ?').get(id);
+    const salesCount = salesCountRow ? salesCountRow.count : 0;
+
+    if (salesCount > 0) {
+      // Soft-delete to preserve foreign key integrity with historical sales
+      db.prepare('UPDATE products SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(id);
+      res.json({ success: true, message: 'Product archived (has historical sales records)' });
+    } else {
+      // Hard delete if product was never sold
+      db.prepare('DELETE FROM stock_logs WHERE product_id = ?').run(id);
+      db.prepare('DELETE FROM products WHERE id = ?').run(id);
+      res.json({ success: true, message: 'Product deleted successfully' });
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -364,69 +396,144 @@ app.get('/api/inventory/logs', (req, res) => {
 // ----------------- ORDERS / BILLING API -----------------
 app.post('/api/orders', (req, res) => {
   try {
-    const { items, customer_name, customer_phone, payment_method, upi_reference, cashier_notes, order_number } = req.body;
+    const { items, customer_name, customer_phone, payment_method, payment_status, upi_reference, cashier_notes } = req.body;
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'Order must contain at least one item' });
     }
 
-    const orderNumber = order_number && order_number.trim() ? order_number.trim() : generateOrderNumber();
+    // 1. Merge cart lines by product_id to prevent duplicate item stock-check bypasses
+    const mergedQuantities = {};
+    for (const item of items) {
+      const prodId = Number(item.product_id);
+      const qty = Number(item.quantity);
+      if (!prodId || isNaN(qty) || qty <= 0) {
+        return res.status(400).json({ error: 'Each order item must have a valid product_id and positive quantity' });
+      }
+      mergedQuantities[prodId] = (mergedQuantities[prodId] || 0) + qty;
+    }
+
+    // 2. Validate stock and compute official prices strictly from DB
+    const preparedItems = [];
     let subtotal = 0;
+    let totalMrp = 0;
+    let totalSavings = 0;
     let totalCost = 0;
 
-    const preparedItems = items.map(item => {
-      const p = db.prepare('SELECT * FROM products WHERE id = ?').get(item.product_id);
-      if (!p) throw new Error(`Product not found with ID ${item.product_id}`);
-
-      const qty = Number(item.quantity);
-      if (qty <= 0) throw new Error(`Invalid quantity for ${p.name}`);
-      if (p.stock < qty) {
-        throw new Error(`Insufficient stock for "${p.name}". Available: ${p.stock}, Requested: ${qty}`);
+    for (const [prodIdStr, totalQty] of Object.entries(mergedQuantities)) {
+      const prodId = Number(prodIdStr);
+      const p = db.prepare('SELECT * FROM products WHERE id = ? AND COALESCE(is_active, 1) = 1').get(prodId);
+      if (!p) {
+        return res.status(400).json({ error: `Product not found or inactive with ID ${prodId}` });
       }
 
-      const sellingPrice = Number(item.selling_price !== undefined ? item.selling_price : p.selling_price);
+      if (p.stock < totalQty) {
+        return res.status(400).json({
+          error: `Insufficient stock for "${p.name}". Available: ${p.stock} ${p.unit}, Requested: ${totalQty} ${p.unit}`
+        });
+      }
+
+      // Trust the database selling price (reject client price tampering)
+      const sellingPrice = Number(p.selling_price);
+      const mrp = Number(p.mrp || p.selling_price);
       const costPrice = Number(p.cost_price);
-      const itemTotal = Number((sellingPrice * qty).toFixed(2));
+
+      const itemTotal = Number((sellingPrice * totalQty).toFixed(2));
+      const itemMrpTotal = Number((mrp * totalQty).toFixed(2));
+      const savings = Math.max(0, Number((itemMrpTotal - itemTotal).toFixed(2)));
 
       subtotal += itemTotal;
-      totalCost += costPrice * qty;
+      totalMrp += itemMrpTotal;
+      totalSavings += savings;
+      totalCost += costPrice * totalQty;
 
-      return {
+      preparedItems.push({
         product_id: p.id,
         product_name: p.name,
         barcode: p.barcode,
         unit: p.unit,
-        quantity: qty,
+        quantity: totalQty,
         cost_price: costPrice,
-        mrp: sellingPrice,
+        mrp: mrp,
         selling_price: sellingPrice,
         item_total: itemTotal,
-        savings: 0
-      };
-    });
+        savings: savings
+      });
+    }
 
-    const finalTotal = Number(subtotal.toFixed(2));
+    const finalSubtotal = Number(subtotal.toFixed(2));
+    const finalTotal = finalSubtotal;
+    const finalTotalMrp = Number(totalMrp.toFixed(2));
+    const finalTotalSavings = Number(totalSavings.toFixed(2));
+
+    // Determine payment status (whitelist to PAID or UNPAID)
+    let finalPaymentStatus = 'PAID';
+    if (payment_method === 'CREDIT' || payment_status === 'UNPAID') {
+      finalPaymentStatus = 'UNPAID';
+    } else if (payment_status === 'PAID') {
+      finalPaymentStatus = 'PAID';
+    }
 
     const createOrderTx = db.transaction(() => {
+      const dateStr = getTodayISTDateStr();
+
       const orderStmt = db.prepare(`
         INSERT INTO orders (
           order_number, customer_name, customer_phone, total_mrp, subtotal, 
           discount, total_amount, total_savings, payment_method, payment_status, 
           upi_reference, cashier_notes
-        ) VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, 'PAID', ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
       `);
 
-      const orderResult = orderStmt.run(
-        orderNumber,
-        customer_name || 'Walk-in Customer',
-        customer_phone || '',
-        finalTotal,
-        finalTotal,
-        finalTotal,
-        payment_method || 'UPI',
-        upi_reference || '',
-        cashier_notes || ''
-      );
+      // Collision-free order sequence generation inside transaction
+      let orderNumber = '';
+      let orderResult = null;
+      let attempts = 0;
+
+      while (!orderResult && attempts < 10) {
+        attempts++;
+        const latestOrder = db.prepare(`
+          SELECT order_number FROM orders 
+          WHERE order_number LIKE ? 
+          ORDER BY id DESC LIMIT 1
+        `).get(`VL-${dateStr}-%`);
+
+        let nextSeq = 1;
+        if (latestOrder && latestOrder.order_number) {
+          const parts = latestOrder.order_number.split('-');
+          const lastNum = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(lastNum)) {
+            nextSeq = lastNum + 1;
+          }
+        }
+
+        orderNumber = `VL-${dateStr}-${String(nextSeq).padStart(4, '0')}`;
+
+        try {
+          orderResult = orderStmt.run(
+            orderNumber,
+            customer_name || 'Walk-in Customer',
+            customer_phone || '',
+            finalTotalMrp,
+            finalSubtotal,
+            finalTotal,
+            finalTotalSavings,
+            payment_method || 'UPI',
+            finalPaymentStatus,
+            upi_reference || '',
+            cashier_notes || ''
+          );
+        } catch (e) {
+          if (e.message && e.message.includes('UNIQUE constraint failed')) {
+            continue;
+          }
+          throw e;
+        }
+      }
+
+      if (!orderResult) {
+        throw new Error('Could not generate unique order number after multiple attempts');
+      }
 
       const orderId = orderResult.lastInsertRowid;
 
@@ -434,12 +541,13 @@ app.post('/api/orders', (req, res) => {
         INSERT INTO order_items (
           order_id, product_id, product_name, barcode, unit, quantity, 
           cost_price, mrp, selling_price, item_total, savings
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
+      // Strict stock reduction without silent clamping
       const updateStockStmt = db.prepare(`
         UPDATE products 
-        SET stock = MAX(0, stock - ?), updated_at = CURRENT_TIMESTAMP
+        SET stock = stock - ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `);
 
@@ -459,20 +567,21 @@ app.post('/api/orders', (req, res) => {
           item.cost_price,
           item.mrp,
           item.selling_price,
-          item.item_total
+          item.item_total,
+          item.savings
         );
 
         updateStockStmt.run(item.quantity, item.product_id);
         stockLogStmt.run(item.product_id, -item.quantity, item.cost_price, `Sold in ${orderNumber}`);
       }
 
-      return orderId;
+      return { orderId, orderNumber };
     });
 
-    const newOrderId = createOrderTx();
+    const { orderId, orderNumber } = createOrderTx();
 
-    const fullOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(newOrderId);
-    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(newOrderId);
+    const fullOrder = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    const orderItems = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(orderId);
 
     res.status(201).json({
       ...fullOrder,
@@ -562,16 +671,17 @@ app.get('/api/analytics', (req, res) => {
   try {
     const { period } = req.query; // 'today', 'week', 'month', 'all'
 
-    let dateCondition = "1=1";
+    // Only count completed PAID orders for revenue and profit metrics
+    let paidCondition = "payment_status = 'PAID'";
     if (period === 'today') {
-      dateCondition = "date(created_at, 'localtime') = date('now', 'localtime')";
+      paidCondition += " AND date(created_at, 'localtime') = date('now', 'localtime')";
     } else if (period === 'week') {
-      dateCondition = "date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')";
+      paidCondition += " AND date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')";
     } else if (period === 'month') {
-      dateCondition = "date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')";
+      paidCondition += " AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')";
     }
 
-    // Summary Totals
+    // Summary Totals for Paid orders
     const summary = db.prepare(`
       SELECT 
         COUNT(id) as total_orders,
@@ -579,26 +689,36 @@ app.get('/api/analytics', (req, res) => {
         COALESCE(SUM(total_mrp), 0) as total_mrp,
         COALESCE(SUM(total_savings), 0) as total_savings
       FROM orders
-      WHERE ${dateCondition}
+      WHERE ${paidCondition}
     `).get();
 
-    // Cost & Profit calculation
+    // Unpaid credit / Udhaar tracking
+    const unpaidStats = db.prepare(`
+      SELECT 
+        COUNT(id) as unpaid_orders_count,
+        COALESCE(SUM(total_amount), 0) as unpaid_credit_amount
+      FROM orders
+      WHERE payment_status = 'UNPAID'
+    `).get();
+
+    // Cost & Profit calculation for Paid orders
     const costSummary = db.prepare(`
       SELECT 
         COALESCE(SUM(oi.cost_price * oi.quantity), 0) as total_cost,
         COALESCE(SUM(oi.quantity), 0) as total_items_sold
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
-      WHERE ${dateCondition.replace(/created_at/g, 'o.created_at')}
+      WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
     `).get();
 
     const revenue = summary.total_revenue;
     const cost = costSummary.total_cost;
-    const profit = Math.max(0, revenue - cost);
-    const profitMargin = revenue > 0 ? ((profit / revenue) * 100).toFixed(1) : 0;
-    const avgOrderValue = summary.total_orders > 0 ? (revenue / summary.total_orders).toFixed(1) : 0;
+    // Real profit calculation (no Math.max(0, ...) clamp so negative profits / losses are visible)
+    const profit = Number((revenue - cost).toFixed(2));
+    const profitMargin = revenue > 0 ? Number(((profit / revenue) * 100).toFixed(1)) : 0;
+    const avgOrderValue = summary.total_orders > 0 ? Number((revenue / summary.total_orders).toFixed(1)) : 0;
 
-    // Dynamic Sales Trend based on chosen period
+    // Dynamic Sales Trend based on chosen period (Paid orders only)
     let salesTrend = [];
     if (period === 'today') {
       salesTrend = db.prepare(`
@@ -607,11 +727,11 @@ app.get('/api/analytics', (req, res) => {
           COUNT(id) as orders_count,
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
-        WHERE date(created_at, 'localtime') = date('now', 'localtime')
+        WHERE ${paidCondition}
         GROUP BY strftime('%H', created_at, 'localtime')
         ORDER BY strftime('%H', created_at, 'localtime') ASC
       `).all();
-    } else if (period === 'week') {
+    } else if (period === 'week' || period === 'month') {
       salesTrend = db.prepare(`
         SELECT 
           strftime('%Y-%m-%d', created_at, 'localtime') as date,
@@ -619,19 +739,7 @@ app.get('/api/analytics', (req, res) => {
           COUNT(id) as orders_count,
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
-        WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-6 days')
-        GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
-        ORDER BY date ASC
-      `).all();
-    } else if (period === 'month') {
-      salesTrend = db.prepare(`
-        SELECT 
-          strftime('%Y-%m-%d', created_at, 'localtime') as date,
-          strftime('%d %b', created_at, 'localtime') as label,
-          COUNT(id) as orders_count,
-          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
-        FROM orders
-        WHERE date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')
+        WHERE ${paidCondition}
         GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
         ORDER BY date ASC
       `).all();
@@ -643,19 +751,20 @@ app.get('/api/analytics', (req, res) => {
           COUNT(id) as orders_count,
           ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
         FROM orders
+        WHERE ${paidCondition}
         GROUP BY strftime('%Y-%m-%d', created_at, 'localtime')
         ORDER BY date ASC
       `).all();
     }
 
-    // Hourly distribution & Peak Hours calculation (8:00 AM - 10:00 PM)
+    // Hourly distribution & Peak Hours calculation (8:00 AM - 10:00 PM in IST)
     const hourlyRaw = db.prepare(`
       SELECT 
         CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour_num,
         COUNT(id) as orders_count,
         ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
       FROM orders
-      WHERE ${dateCondition === "date(created_at, 'localtime') = date('now', 'localtime')" ? "1=1" : dateCondition}
+      WHERE ${paidCondition}
       GROUP BY hour_num
       ORDER BY hour_num ASC
     `).all();
@@ -686,7 +795,7 @@ app.get('/api/analytics', (req, res) => {
         COUNT(id) as orders_count,
         ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
       FROM orders
-      WHERE ${dateCondition === "date(created_at, 'localtime') = date('now', 'localtime')" ? "1=1" : dateCondition}
+      WHERE ${paidCondition}
       GROUP BY dow
       ORDER BY dow ASC
     `).all();
@@ -717,7 +826,7 @@ app.get('/api/analytics', (req, res) => {
 
     const peakDay = dayOfWeekDistribution.reduce((max, d) => (d.revenue > (max?.revenue || 0) ? d : max), dayOfWeekDistribution[0]);
 
-    // Top Selling Products
+    // Top Selling Products (from Paid orders)
     const topProducts = db.prepare(`
       SELECT 
         oi.product_name,
@@ -728,20 +837,20 @@ app.get('/api/analytics', (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN products p ON oi.product_id = p.id
-      WHERE ${dateCondition.replace(/created_at/g, 'o.created_at')}
+      WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
       GROUP BY oi.product_name
       ORDER BY total_sales DESC
       LIMIT 10
     `).all();
 
-    // Payment methods distribution
+    // Payment methods distribution (shows Cash, UPI, Card and unpaid credit breakdown)
     const paymentMethods = db.prepare(`
       SELECT 
         payment_method,
         COUNT(id) as count,
         COALESCE(SUM(total_amount), 0) as total_amount
       FROM orders
-      WHERE ${dateCondition}
+      WHERE ${paidCondition}
       GROUP BY payment_method
     `).all();
 
@@ -754,22 +863,23 @@ app.get('/api/analytics', (req, res) => {
         SUM(CASE WHEN stock <= low_stock_threshold THEN 1 ELSE 0 END) as low_stock_count,
         SUM(CASE WHEN stock = 0 THEN 1 ELSE 0 END) as out_of_stock_count
       FROM products
+      WHERE COALESCE(is_active, 1) = 1
     `).get();
 
-    // 1. Sales Growth Comparison with previous period
-    let prevCondition = "1=0";
+    // 1. Sales Growth Comparison with previous period (Paid orders only)
+    let prevCondition = "payment_status = 'PAID' AND 1=0";
     if (period === 'today') {
-      prevCondition = "date(created_at, 'localtime') = date('now', 'localtime', '-1 day')";
+      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')";
     } else if (period === 'week') {
-      prevCondition = "date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')";
+      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')";
     } else if (period === 'month') {
-      prevCondition = "date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')";
+      prevCondition = "payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')";
     }
     const prevSummary = db.prepare(`SELECT COALESCE(SUM(total_amount), 0) as prev_revenue FROM orders WHERE ${prevCondition}`).get();
     const prevRevenue = prevSummary ? prevSummary.prev_revenue : 0;
     const growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
 
-    // 2. Category-wise sales breakdown
+    // 2. Category-wise sales breakdown (Paid orders only)
     const categorySalesRaw = db.prepare(`
       SELECT 
         COALESCE(p.category, 'General') as category,
@@ -779,7 +889,7 @@ app.get('/api/analytics', (req, res) => {
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN products p ON oi.product_id = p.id
-      WHERE ${dateCondition.replace(/created_at/g, 'o.created_at')}
+      WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
       GROUP BY category
       ORDER BY revenue DESC
     `).all();
@@ -794,7 +904,8 @@ app.get('/api/analytics', (req, res) => {
       SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.image_url,
              COALESCE(SUM(oi.quantity), 0) as units_sold
       FROM products p
-      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${dateCondition})
+      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${paidCondition})
+      WHERE COALESCE(p.is_active, 1) = 1
       GROUP BY p.id
       ORDER BY units_sold ASC, p.stock DESC
       LIMIT 5
@@ -833,7 +944,9 @@ app.get('/api/analytics', (req, res) => {
         total_items_sold: costSummary.total_items_sold,
         prev_revenue: Number(prevRevenue.toFixed(2)),
         growth_percent: growthPercent,
-        avg_items_per_order: summary.total_orders > 0 ? Number((costSummary.total_items_sold / summary.total_orders).toFixed(1)) : 0
+        avg_items_per_order: summary.total_orders > 0 ? Number((costSummary.total_items_sold / summary.total_orders).toFixed(1)) : 0,
+        unpaid_credit_orders: unpaidStats.unpaid_orders_count || 0,
+        unpaid_credit_amount: Number((unpaidStats.unpaid_credit_amount || 0).toFixed(2))
       },
       inventory: {
         ...inventoryStats,
@@ -888,7 +1001,7 @@ app.delete('/api/orders/:id', (req, res) => {
     const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
     const restockTx = db.transaction(() => {
       const updateStockStmt = db.prepare('UPDATE products SET stock = stock + ? WHERE id = ?');
-      const logStmt = db.prepare('INSERT INTO stock_logs (product_id, change_type, quantity, notes) VALUES (?, "RETURN", ?, ?)');
+      const logStmt = db.prepare("INSERT INTO stock_logs (product_id, change_type, quantity, notes) VALUES (?, 'RETURN', ?, ?)");
 
       for (const it of items) {
         if (it.product_id) {

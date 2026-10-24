@@ -17,6 +17,16 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
     window.print();
   };
 
+  const parseDate = (d) => {
+    if (!d) return new Date();
+    const str = typeof d === 'string' && !d.includes('Z') && !d.includes('+')
+      ? d.replace(' ', 'T') + 'Z'
+      : d;
+    return new Date(str);
+  };
+
+  const orderDate = parseDate(order.created_at);
+
   const handleWhatsAppShare = () => {
     if (!order.customer_phone) {
       alert('No customer phone number recorded for this bill.');
@@ -28,7 +38,7 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
 
     let msg = `*--- ${storeName.toUpperCase()} ---*\n`;
     msg += `🧾 *Bill No:* ${order.order_number}\n`;
-    msg += `📅 *Date:* ${new Date(order.created_at).toLocaleString('en-IN')}\n\n`;
+    msg += `📅 *Date:* ${orderDate.toLocaleString('en-IN')}\n\n`;
     msg += `*Items Purchased:*\n`;
 
     (order.items || []).forEach((item, idx) => {
@@ -37,7 +47,10 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
 
     msg += `\n-------------------------\n`;
     msg += `*Total Amount Paid: ${currency}${order.total_amount.toFixed(2)}*\n`;
-    msg += `💳 Mode: ${order.payment_method}\n`;
+    if (order.total_savings > 0) {
+      msg += `🎉 *Customer Total Savings: ${currency}${order.total_savings.toFixed(2)}*\n`;
+    }
+    msg += `💳 Mode: ${order.payment_method} (${order.payment_status || 'PAID'})\n`;
     msg += `-------------------------\n`;
     msg += `${footerMsg}\n`;
 
@@ -107,10 +120,10 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
             <div className="py-2.5 border-b border-dashed border-slate-400 space-y-1 text-xs">
               <div className="flex justify-between">
                 <span>Bill No: <strong className="font-bold text-slate-900">{order.order_number}</strong></span>
-                <span>Date: {new Date(order.created_at).toLocaleDateString('en-IN')}</span>
+                <span>Date: {orderDate.toLocaleDateString('en-IN')}</span>
               </div>
               <div className="flex justify-between text-slate-600">
-                <span>Time: {new Date(order.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                <span>Time: {orderDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 <span>Counter: 01</span>
               </div>
               {order.customer_name && (
@@ -155,6 +168,12 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
                 <span>Total Items:</span>
                 <span>{(order.items || []).length} items</span>
               </div>
+              {order.total_savings > 0 && (
+                <div className="flex justify-between text-xs text-emerald-700 font-bold">
+                  <span>TOTAL SAVINGS (MRP):</span>
+                  <span>{currency}{Number(order.total_savings).toFixed(2)}</span>
+                </div>
+              )}
               <div className="flex justify-between text-base font-black pt-1 border-t border-slate-300">
                 <span>TOTAL PAYABLE:</span>
                 <span>{currency}{order.total_amount.toFixed(2)}</span>

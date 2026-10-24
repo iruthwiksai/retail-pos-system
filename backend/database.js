@@ -27,6 +27,7 @@ function initDatabase() {
       stock REAL NOT NULL DEFAULT 0,
       low_stock_threshold REAL DEFAULT 5,
       image_url TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
@@ -85,6 +86,12 @@ function initDatabase() {
 
   try {
     db.exec("ALTER TABLE products ADD COLUMN image_url TEXT");
+  } catch (e) {
+    // Column already exists
+  }
+
+  try {
+    db.exec("ALTER TABLE products ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1");
   } catch (e) {
     // Column already exists
   }

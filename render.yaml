@@ -6,6 +6,8 @@ services:
     buildCommand: npm run postinstall
     startCommand: npm start
     envVars:
+      - key: TZ
+        value: Asia/Kolkata
       - key: NODE_VERSION
         value: 20.18.0
       - key: NODE_ENV

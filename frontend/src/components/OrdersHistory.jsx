@@ -11,6 +11,14 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
 
   const currency = settings.currency_symbol || '₹';
 
+  const parseDate = (d) => {
+    if (!d) return new Date();
+    const str = typeof d === 'string' && !d.includes('Z') && !d.includes('+')
+      ? d.replace(' ', 'T') + 'Z'
+      : d;
+    return new Date(str);
+  };
+
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -299,13 +307,13 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
                       {o.order_number}
                     </td>
                     <td className="py-3.5 px-4 whitespace-nowrap">
-                      {new Date(o.created_at).toLocaleDateString('en-IN', {
+                      {parseDate(o.created_at).toLocaleDateString('en-IN', {
                         day: '2-digit',
                         month: 'short',
                         year: 'numeric'
                       })}{' '}
                       <span className="text-slate-400 text-xs">
-                        {new Date(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        {parseDate(o.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </td>
                     <td className="py-3.5 px-4">
