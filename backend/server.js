@@ -1507,9 +1507,24 @@ const staticDir = fs.existsSync(path.join(publicPath, 'index.html'))
 
 if (staticDir) {
   console.log(`Serving web app from: ${staticDir}`);
-  app.use(express.static(staticDir));
+  // Serve static hashed assets with caching, but index.html without caching
+  app.use(express.static(staticDir, {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith('index.html')) {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      } else {
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+      }
+    }
+  }));
+
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       return res.sendFile(path.join(staticDir, 'index.html'));
     }
     next();

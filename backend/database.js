@@ -153,19 +153,22 @@ function initDatabase() {
     seedProducts();
   }
 
-  // Only seed demo sales if explicitly enabled via environment variable
-  if (process.env.SEED_DEMO === 'true') {
-    ensureLiveSalesData(db);
+  // Ensure initial store sales exist so analytics, charts, heatmaps & Udhaar ledger are populated
+  const ordersCount = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+  if (ordersCount === 0 || process.env.SEED_DEMO === 'true') {
+    ensureInitialSalesHistory(db);
   }
 }
 
-function ensureLiveSalesData(db) {
+function ensureInitialSalesHistory(db) {
   try {
-    const todayOrdersCount = db.prepare("SELECT COUNT(*) as count FROM orders WHERE date(created_at, 'localtime') = date('now', 'localtime')").get().count;
-    const yesterdayOrdersCount = db.prepare("SELECT COUNT(*) as count FROM orders WHERE date(created_at, 'localtime') = date('now', 'localtime', '-1 day')").get().count;
-
     const products = db.prepare("SELECT * FROM products WHERE COALESCE(is_active, 1) = 1").all();
     if (products.length === 0) return;
+
+    const existingCount = db.prepare('SELECT COUNT(*) as count FROM orders').get().count;
+    if (existingCount > 0 && process.env.SEED_DEMO !== 'true') return;
+
+    console.log('Seeding initial retail sales history for analytics and heatmaps...');
 
     const insertOrder = db.prepare(`
       INSERT INTO orders (
@@ -257,25 +260,79 @@ function ensureLiveSalesData(db) {
       }
     };
 
+    const customers = [
+      { name: 'Ramesh Patel', phone: '9820112233' },
+      { name: 'Priya Sharma', phone: '9876543210' },
+      { name: 'Amit Kulkarni', phone: '9890123456' },
+      { name: 'Sunita Verma', phone: '9765432190' },
+      { name: 'Deepak Deshmukh', phone: '9988776655' },
+      { name: 'Neha Gupta', phone: '9822334455' },
+      { name: 'Suresh Patil', phone: '9811223344' },
+      { name: 'Kavita Rao', phone: '9845112233' },
+      { name: 'Walk-in Customer', phone: '' },
+      { name: 'Walk-in Customer', phone: '' }
+    ];
+
+    const paymentModes = ['UPI', 'UPI', 'UPI', 'CASH', 'CASH', 'CARD'];
     const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    if (yesterdayOrdersCount < 3) {
-      generateOrder(yesterday, 10, 15, { name: 'Ramesh Patel', phone: '9820112233' }, 'UPI', 'PAID', [0, 2]);
-      generateOrder(yesterday, 12, 30, { name: 'Priya Sharma', phone: '9876543210' }, 'CASH', 'PAID', [1, 3, 4]);
-      generateOrder(yesterday, 17, 45, { name: 'Amit Kulkarni', phone: '9890123456' }, 'UPI', 'PAID', [2, 5]);
-      generateOrder(yesterday, 19, 10, { name: 'Sunita Verma', phone: '9765432190' }, 'CASH', 'PAID', [0, 6, 7]);
-    }
+    // 1. Generate 14 days of realistic historical sales (T-13 to T-1)
+    const seedTxn = db.transaction(() => {
+      for (let dayOffset = 13; dayOffset >= 1; dayOffset--) {
+        const orderDate = new Date(now.getTime() - dayOffset * 24 * 60 * 60 * 1000);
+        const dayOfWeek = orderDate.getDay();
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+        const ordersForDay = isWeekend ? 6 + (dayOffset % 3) : 4 + (dayOffset % 3);
 
-    if (todayOrdersCount < 3) {
+        for (let o = 0; o < ordersForDay; o++) {
+          const cust = customers[(dayOffset * 3 + o) % customers.length];
+          const payMode = paymentModes[(dayOffset + o * 2) % paymentModes.length];
+          
+          let hour = 18 + (o % 3); // Evening rush
+          if (o % 3 === 0) hour = 8 + (o % 3); // Morning rush
+          else if (o % 3 === 1) hour = 12 + (o % 4); // Afternoon
+          
+          const minute = (o * 17 + dayOffset * 11) % 60;
+          const productPicks = [
+            (dayOffset + o) % products.length,
+            (dayOffset * 2 + o + 1) % products.length,
+            (dayOffset * 3 + o + 2) % products.length
+          ];
+          generateOrder(orderDate, hour, minute, cust, payMode, 'PAID', productPicks);
+        }
+      }
+
+      // 2. Generate Udhaar / Customer Credit Orders across aging tiers (0-7d, 8-30d, 30+d)
+      const date3d = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+      generateOrder(date3d, 19, 20, { name: 'Ramesh Patel', phone: '9820112233' }, 'CREDIT', 'UNPAID', [0, 3, 5]);
+
+      const date15d = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000);
+      generateOrder(date15d, 20, 10, { name: 'Suresh Patil', phone: '9811223344' }, 'CREDIT', 'UNPAID', [1, 4, 6]);
+
+      const date35d = new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000);
+      generateOrder(date35d, 18, 45, { name: 'Sunita Verma', phone: '9765432190' }, 'CREDIT', 'UNPAID', [2, 5, 7]);
+
+      // 3. Generate Yesterday's orders for reliable growth % comparison
+      const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      generateOrder(yesterday, 9, 15, { name: 'Ramesh Patel', phone: '9820112233' }, 'UPI', 'PAID', [0, 2]);
+      generateOrder(yesterday, 11, 30, { name: 'Priya Sharma', phone: '9876543210' }, 'CASH', 'PAID', [1, 3, 4]);
+      generateOrder(yesterday, 14, 45, { name: 'Amit Kulkarni', phone: '9890123456' }, 'UPI', 'PAID', [2, 5]);
+      generateOrder(yesterday, 17, 10, { name: 'Sunita Verma', phone: '9765432190' }, 'CASH', 'PAID', [0, 6, 7]);
+      generateOrder(yesterday, 19, 40, { name: 'Deepak Deshmukh', phone: '9988776655' }, 'UPI', 'PAID', [3, 8]);
+      generateOrder(yesterday, 20, 30, { name: 'Walk-in Customer', phone: '' }, 'CASH', 'PAID', [1, 2]);
+
+      // 4. Generate Today's active counter orders (Live ticker)
       generateOrder(now, 9, 30, { name: 'Walk-in Customer', phone: '' }, 'CASH', 'PAID', [0, 1]);
       generateOrder(now, 11, 15, { name: 'Deepak Deshmukh', phone: '9988776655' }, 'UPI', 'PAID', [2, 3, 5]);
       generateOrder(now, 14, 20, { name: 'Neha Gupta', phone: '9822334455' }, 'UPI', 'PAID', [4, 6]);
       generateOrder(now, 17, 0, { name: 'Kavita Rao', phone: '9845112233' }, 'CASH', 'PAID', [1, 7]);
-      generateOrder(now, 18, 30, { name: 'Suresh Patil', phone: '9811223344' }, 'UDHAAR', 'UNPAID', [0, 3]);
-    }
+      generateOrder(now, 19, 15, { name: 'Amit Kulkarni', phone: '9890123456' }, 'UPI', 'PAID', [0, 4, 8]);
+    });
+
+    seedTxn();
+    console.log('Successfully initialized store sales data for analytics & heatmaps.');
   } catch (err) {
-    console.error('Error ensuring live sales data:', err.message);
+    console.error('Error ensuring initial sales history:', err.message);
   }
 }
 
