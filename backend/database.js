@@ -186,13 +186,13 @@ function ensureInitialSalesHistory(db) {
     `);
 
     const pad = (n) => String(n).padStart(2, '0');
+    let seqCounter = 100;
 
     const generateOrder = (dateObj, hour, minute, customer, payMode, payStatus, productIndices) => {
       const dStr = `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}`;
       const tStr = `${pad(hour)}:${pad(minute)}:00`;
       const createdAt = `${dStr} ${tStr}`;
-      const numCode = `${dStr.replace(/-/g, '')}-${String(Math.floor(Math.random() * 800) + 100).padStart(4, '0')}`;
-      const orderNumber = `VL-${numCode}`;
+      const orderNumber = `VL-${dStr.replace(/-/g, '')}-${String(seqCounter++).padStart(4, '0')}`;
 
       let totalMrp = 0;
       let subtotal = 0;
