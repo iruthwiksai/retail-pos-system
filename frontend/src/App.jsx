@@ -248,6 +248,7 @@ export default function App() {
           <Suspense fallback={<TabLoadingFallback />}>
             <Analytics
               settings={settings}
+              onGoToPos={() => setActiveTab('pos')}
             />
           </Suspense>
         )}
