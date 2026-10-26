@@ -6,9 +6,11 @@ frontend/node_modules/
 # Production build (committed for instant 0-build Render deployment)
 # frontend/dist/
 
-# Database temporary WAL files
+# Database files
+backend/*.db
 backend/*.db-shm
 backend/*.db-wal
+*.db
 
 # Logs
 *.log

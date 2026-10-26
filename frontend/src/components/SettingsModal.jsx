@@ -20,12 +20,12 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
   useEffect(() => {
     if (settings) {
       setFormData({
-        store_name: settings.store_name || 'DMart Local Supermarket',
+        store_name: settings.store_name || 'Manidevi General Store',
         store_tagline: settings.store_tagline || 'Daily Best Prices • Maximum Savings',
         store_address: settings.store_address || 'Shop No. 12, Main Market Road',
         store_phone: settings.store_phone || '+91 98765 43210',
-        upi_id: settings.upi_id || 'smartretail@okaxis',
-        upi_name: settings.upi_name || 'Smart Supermarket',
+        upi_id: settings.upi_id || 'manidevi@upi',
+        upi_name: settings.upi_name || 'Manidevi General Store',
         gstin: settings.gstin || '27AABCS1429B1ZB',
         receipt_footer_msg: settings.receipt_footer_msg || 'Thank You For Shopping With Us! Visit Again.',
         currency_symbol: settings.currency_symbol || '₹'

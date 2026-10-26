@@ -110,15 +110,46 @@ app.get('/api/settings', (req, res) => {
   }
 });
 
+const ALLOWED_SETTINGS_KEYS = new Set([
+  'store_name',
+  'store_tagline',
+  'store_address',
+  'store_phone',
+  'upi_id',
+  'upi_name',
+  'gstin',
+  'currency_symbol',
+  'receipt_footer_msg'
+]);
+
 app.post('/api/settings', (req, res) => {
   try {
+    if (!req.body || typeof req.body !== 'object') {
+      return res.status(400).json({ error: 'Invalid settings body' });
+    }
+
+    // Validate UPI ID format if provided
+    if (req.body.upi_id) {
+      const upiStr = String(req.body.upi_id).trim();
+      const upiRegex = /^[\w.\-_]{2,256}@[a-zA-Z]{2,64}$/;
+      if (!upiRegex.test(upiStr)) {
+        return res.status(400).json({ error: 'Invalid UPI ID format. Expected format: name@bank (e.g. shop@okaxis or 9876543210@upi)' });
+      }
+    }
+
+    // Filter strictly to allowed keys (reject junk/injected keys)
+    const validEntries = Object.entries(req.body).filter(([k]) => ALLOWED_SETTINGS_KEYS.has(k));
+    if (validEntries.length === 0) {
+      return res.status(400).json({ error: 'No valid setting keys provided' });
+    }
+
     const updateStmt = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-    const updateMany = db.transaction((settingsObj) => {
-      for (const [key, val] of Object.entries(settingsObj)) {
-        updateStmt.run(key, String(val));
+    const updateMany = db.transaction((sanitizedEntries) => {
+      for (const [key, val] of sanitizedEntries) {
+        updateStmt.run(key, String(val).slice(0, 500));
       }
     });
-    updateMany(req.body);
+    updateMany(validEntries);
     res.json({ success: true, message: 'Settings updated successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -466,12 +497,26 @@ app.post('/api/orders', (req, res) => {
     const finalTotalMrp = Number(totalMrp.toFixed(2));
     const finalTotalSavings = Number(totalSavings.toFixed(2));
 
-    // Determine payment status (whitelist to PAID or UNPAID)
+    // Strictly whitelist payment method & status
+    const ALLOWED_PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'CREDIT', 'UDHAAR'];
+    const rawMethod = (payment_method || 'CASH').toString().toUpperCase().trim();
+    if (!ALLOWED_PAYMENT_METHODS.includes(rawMethod)) {
+      return res.status(400).json({
+        error: `Invalid payment method "${payment_method}". Allowed methods: ${ALLOWED_PAYMENT_METHODS.join(', ')}`
+      });
+    }
+    const finalPaymentMethod = (rawMethod === 'CREDIT' || rawMethod === 'UDHAAR') ? 'UDHAAR' : rawMethod;
+
+    const ALLOWED_PAYMENT_STATUS = ['PAID', 'UNPAID'];
     let finalPaymentStatus = 'PAID';
-    if (payment_method === 'CREDIT' || payment_status === 'UNPAID') {
+    if (finalPaymentMethod === 'UDHAAR' || payment_status === 'UNPAID') {
       finalPaymentStatus = 'UNPAID';
-    } else if (payment_status === 'PAID') {
-      finalPaymentStatus = 'PAID';
+    } else if (payment_status && ALLOWED_PAYMENT_STATUS.includes(payment_status)) {
+      finalPaymentStatus = payment_status;
+    } else if (payment_status && !ALLOWED_PAYMENT_STATUS.includes(payment_status)) {
+      return res.status(400).json({
+        error: `Invalid payment status "${payment_status}". Allowed statuses: PAID, UNPAID`
+      });
     }
 
     const createOrderTx = db.transaction(() => {
@@ -518,7 +563,7 @@ app.post('/api/orders', (req, res) => {
             finalSubtotal,
             finalTotal,
             finalTotalSavings,
-            payment_method || 'UPI',
+            finalPaymentMethod,
             finalPaymentStatus,
             upi_reference || '',
             cashier_notes || ''
@@ -672,6 +717,7 @@ app.get('/api/analytics', (req, res) => {
     const { period, startDate, endDate } = req.query; // 'today', 'week', 'month', 'all', 'custom'
 
     // 1. Build Condition for selected period (PAID orders only for revenue)
+    const isDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !isNaN(Date.parse(s));
     let paidCondition = "payment_status = 'PAID'";
     let periodLabel = 'Last 7 Days';
 
@@ -684,7 +730,7 @@ app.get('/api/analytics', (req, res) => {
     } else if (period === 'month') {
       paidCondition += " AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')";
       periodLabel = 'This Month';
-    } else if (period === 'custom' && startDate && endDate) {
+    } else if (period === 'custom' && isDate(startDate) && isDate(endDate)) {
       paidCondition += ` AND date(created_at, 'localtime') BETWEEN date('${startDate}') AND date('${endDate}')`;
       periodLabel = `${startDate} to ${endDate}`;
     } else {
@@ -718,22 +764,22 @@ app.get('/api/analytics', (req, res) => {
     const profitMargin = revenue > 0 ? Number(((grossProfit / revenue) * 100).toFixed(1)) : 0;
     const avgOrderValue = summary.total_orders > 0 ? Number((revenue / summary.total_orders).toFixed(1)) : 0;
 
-    // 3. Sales Growth Comparison with previous period (null for 'all' to prevent misleading +100%)
+    // 3. Sales Growth Comparison with previous period (return null if prev period had no sales)
     let prevRevenue = null;
     let growthPercent = null;
 
     if (period === 'today') {
       const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') = date('now', 'localtime', '-1 day')").get();
       prevRevenue = prev.rev;
-      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : null;
     } else if (period === 'week') {
       const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-13 days') AND date(created_at, 'localtime') < date('now', 'localtime', '-6 days')").get();
       prevRevenue = prev.rev;
-      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : null;
     } else if (period === 'month') {
       const prev = db.prepare("SELECT COALESCE(SUM(total_amount), 0) as rev FROM orders WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', 'start of month', '-1 month') AND date(created_at, 'localtime') < date('now', 'localtime', 'start of month')").get();
       prevRevenue = prev.rev;
-      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : (revenue > 0 ? 100 : 0);
+      growthPercent = prevRevenue > 0 ? Number((((revenue - prevRevenue) / prevRevenue) * 100).toFixed(1)) : null;
     }
 
     // 4. Trend Data with Missing Date Filling (No Gaps in Trend!)
@@ -971,21 +1017,25 @@ app.get('/api/analytics', (req, res) => {
       LIMIT 10
     `).all();
 
-    // 9. Slow-moving Products with stock velocity and days of stock left
+    // 9. Slow-moving Products with 30-day stock velocity and days of stock left
     const slowProducts = db.prepare(`
       SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.cost_price, p.low_stock_threshold,
-             COALESCE(SUM(oi.quantity), 0) as units_sold
+             COALESCE(SUM(oi.quantity), 0) as units_sold_30d
       FROM products p
-      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (SELECT id FROM orders WHERE ${paidCondition})
+      LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (
+        SELECT id FROM orders 
+        WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-29 days')
+      )
       WHERE COALESCE(p.is_active, 1) = 1
       GROUP BY p.id
-      ORDER BY units_sold ASC, p.stock DESC
+      ORDER BY units_sold_30d ASC, p.stock DESC
       LIMIT 6
     `).all().map(p => {
-      const velocity = p.units_sold / 30; // approx per day
-      const daysOfStock = velocity > 0 ? Math.round(p.stock / velocity) : 999;
+      const velocity = p.units_sold_30d / 30; // true 30-day daily run rate
+      const daysOfStock = velocity > 0 ? Math.round(p.stock / velocity) : (p.stock > 0 ? 999 : 0);
       return {
         ...p,
+        units_sold: p.units_sold_30d,
         days_of_stock: daysOfStock,
         needs_reorder: p.stock <= (p.low_stock_threshold || 5)
       };
@@ -1149,10 +1199,69 @@ app.get('/api/analytics', (req, res) => {
     `).all();
 
     const inventoryVal = inventoryStats.inventory_valuation || 1;
-    const turnoverRatio = cost > 0 ? Number((cost / inventoryVal).toFixed(2)) : 0;
-    const periodDays = period === 'today' ? 1 : (period === 'week' ? 7 : (period === 'month' ? 30 : 90));
+    let periodDays = 30;
+    if (period === 'today') {
+      periodDays = 1;
+    } else if (period === 'week') {
+      periodDays = 7;
+    } else if (period === 'month') {
+      const nowIST = new Date(Date.now() + 5.5 * 60 * 60 * 1000);
+      periodDays = Math.max(1, nowIST.getDate());
+    } else if (period === 'custom' && isDate(startDate) && isDate(endDate)) {
+      periodDays = Math.max(1, Math.round((new Date(endDate) - new Date(startDate)) / (24 * 60 * 60 * 1000)) + 1);
+    } else {
+      const firstOrder = db.prepare("SELECT MIN(date(created_at, 'localtime')) as first_date FROM orders WHERE payment_status = 'PAID'").get();
+      if (firstOrder && firstOrder.first_date) {
+        periodDays = Math.max(1, Math.round((Date.now() - new Date(firstOrder.first_date)) / (24 * 60 * 60 * 1000)));
+      } else {
+        periodDays = 30;
+      }
+    }
     const dailyCost = cost / periodDays;
     const daysOnHand = dailyCost > 0 ? Math.round(inventoryVal / dailyCost) : Math.round(inventoryVal / (cost || 1));
+    const turnoverRatio = cost > 0 ? Number((cost / inventoryVal).toFixed(2)) : 0;
+
+    // 15. Actionable Supplier Reorder List (grouped by wholesaler)
+    const lowStockProducts = db.prepare(`
+      SELECT p.*,
+             COALESCE(s.supplier_name, 'Direct Wholesaler') as preferred_supplier
+      FROM products p
+      LEFT JOIN (
+        SELECT product_id, supplier_name, MAX(created_at)
+        FROM stock_logs 
+        WHERE change_type = 'STOCK_IN' AND supplier_name IS NOT NULL AND supplier_name != ''
+        GROUP BY product_id
+      ) s ON p.id = s.product_id
+      WHERE COALESCE(p.is_active, 1) = 1 AND p.stock <= (p.low_stock_threshold || 10)
+      ORDER BY p.stock ASC
+    `).all();
+
+    const reorderGroups = {};
+    lowStockProducts.forEach(p => {
+      const sup = p.preferred_supplier || 'Direct Wholesaler';
+      if (!reorderGroups[sup]) {
+        reorderGroups[sup] = {
+          supplier: sup,
+          items: [],
+          total_estimated_cost: 0
+        };
+      }
+      const suggestedQty = Math.max((p.low_stock_threshold || 10) * 2 - Math.floor(p.stock), p.unit === 'kg' ? 10 : 12);
+      const estCost = Number((suggestedQty * p.cost_price).toFixed(2));
+      reorderGroups[sup].items.push({
+        id: p.id,
+        name: p.name,
+        category: p.category,
+        current_stock: p.stock,
+        unit: p.unit,
+        low_stock_threshold: p.low_stock_threshold,
+        suggested_qty: suggestedQty,
+        cost_price: p.cost_price,
+        estimated_cost: estCost
+      });
+      reorderGroups[sup].total_estimated_cost += estCost;
+    });
+    const reorderList = Object.values(reorderGroups);
 
     res.json({
       period: period || 'week',
@@ -1200,6 +1309,7 @@ app.get('/api/analytics', (req, res) => {
       },
       topProducts,
       slowProducts,
+      reorderList,
       categorySales,
       supplierSpending,
       paymentMethods,
@@ -1221,15 +1331,30 @@ app.patch('/api/orders/:id/status', (req, res) => {
     const { id } = req.params;
     const { payment_status, payment_method, upi_reference } = req.body;
 
+    const ALLOWED_STATUS = ['PAID', 'UNPAID', 'CANCELLED'];
+    if (payment_status && !ALLOWED_STATUS.includes(payment_status)) {
+      return res.status(400).json({ error: `Invalid payment status. Allowed: ${ALLOWED_STATUS.join(', ')}` });
+    }
+
+    const ALLOWED_PAYMENT_METHODS = ['CASH', 'UPI', 'CARD', 'CREDIT', 'UDHAAR'];
+    let finalMethod = undefined;
+    if (payment_method) {
+      const upper = payment_method.toString().toUpperCase().trim();
+      if (!ALLOWED_PAYMENT_METHODS.includes(upper)) {
+        return res.status(400).json({ error: `Invalid payment method. Allowed: ${ALLOWED_PAYMENT_METHODS.join(', ')}` });
+      }
+      finalMethod = (upper === 'CREDIT' || upper === 'UDHAAR') ? 'UDHAAR' : upper;
+    }
+
     const stmt = db.prepare(`
       UPDATE orders 
-      SET payment_status = ?, 
+      SET payment_status = COALESCE(?, payment_status), 
           payment_method = COALESCE(?, payment_method),
           upi_reference = COALESCE(?, upi_reference)
       WHERE id = ? OR order_number = ?
     `);
 
-    stmt.run(payment_status, payment_method, upi_reference, id, id);
+    stmt.run(payment_status, finalMethod, upi_reference, id, id);
     const updated = db.prepare('SELECT * FROM orders WHERE id = ? OR order_number = ?').get(id, id);
     res.json({ success: true, order: updated });
   } catch (err) {
@@ -1242,6 +1367,10 @@ app.delete('/api/orders/:id', (req, res) => {
     const { id } = req.params;
     const order = db.prepare('SELECT * FROM orders WHERE id = ? OR order_number = ?').get(id, id);
     if (!order) return res.status(404).json({ error: 'Order not found' });
+
+    if (order.payment_status === 'CANCELLED') {
+      return res.status(400).json({ error: 'Order is already marked as CANCELLED' });
+    }
 
     // Restock items back into inventory
     const items = db.prepare('SELECT * FROM order_items WHERE order_id = ?').all(order.id);
@@ -1256,11 +1385,19 @@ app.delete('/api/orders/:id', (req, res) => {
         }
       }
 
-      db.prepare('DELETE FROM orders WHERE id = ?').run(order.id);
+      // Soft-cancel: preserve audit trail with payment_status = 'CANCELLED'
+      db.prepare(`
+        UPDATE orders 
+        SET payment_status = 'CANCELLED',
+            cashier_notes = CASE WHEN cashier_notes IS NULL OR cashier_notes = '' 
+                                 THEN 'Order cancelled & restocked' 
+                                 ELSE cashier_notes || ' [Order cancelled & restocked]' END
+        WHERE id = ?
+      `).run(order.id);
     });
 
     restockTx();
-    res.json({ success: true, message: 'Order cancelled and stock restored successfully' });
+    res.json({ success: true, message: `Order ${order.order_number} cancelled and items restocked to inventory` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

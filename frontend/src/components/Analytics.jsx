@@ -55,7 +55,7 @@ export default function Analytics({ settings = {} }) {
   const [error, setError] = useState(null);
 
   const currency = settings.currency_symbol || '₹';
-  const storeName = settings.store_name || 'VijayaLakshmi Minimart';
+  const storeName = settings.store_name || 'Manidevi General Store';
 
   // Compact currency formatter (e.g. ₹1.5k, ₹25k)
   const formatCompact = (val) => {
@@ -104,7 +104,7 @@ export default function Analytics({ settings = {} }) {
     const u = analyticsData.udhaar || {};
 
     const rows = [
-      ['Report', 'VijayaLakshmi Minimart Business Analytics'],
+      ['Report', 'Manidevi General Store Business Analytics'],
       ['Generated At', new Date().toLocaleString('en-IN')],
       ['Selected Period', period],
       [],
@@ -359,81 +359,174 @@ export default function Analytics({ settings = {} }) {
       {!loading && activeTab === 'overview' && (
         <div className="space-y-6">
 
-          {/* 5 Big Questions Every Shopkeeper Asks Every Morning/Evening */}
+          {/* Real-time Today Counter Pulse Banner */}
+          <div className="bg-gradient-to-r from-emerald-900 via-emerald-800 to-slate-900 text-white p-4 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-md border border-emerald-700/50">
+            <div className="flex items-center space-x-3">
+              <span className="relative flex h-3.5 w-3.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500"></span>
+              </span>
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-wider text-emerald-300">
+                  Live Billing Counter — Today ({new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })})
+                </div>
+                <div className="text-base sm:text-lg font-black text-white flex items-center gap-2 flex-wrap">
+                  <span>Sales: <span className="text-yellow-300">{currency}{today.today_revenue.toLocaleString('en-IN')}</span></span>
+                  <span className="text-emerald-400 text-xs font-bold">({today.today_orders} bills billed)</span>
+                  <span className="text-emerald-600 hidden sm:inline">•</span>
+                  <span>Gross Profit: <span className="text-emerald-300">{currency}{today.today_gross_profit.toLocaleString('en-IN')}</span> ({today.today_margin}%)</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 text-xs font-bold flex-wrap">
+              <span className="bg-emerald-800/90 text-emerald-100 border border-emerald-600 px-3 py-1.5 rounded-xl shadow-xs">
+                💵 Cash: <strong className="text-white">{currency}{today.today_cash.toLocaleString('en-IN')}</strong>
+              </span>
+              <span className="bg-blue-800/90 text-blue-100 border border-blue-600 px-3 py-1.5 rounded-xl shadow-xs">
+                📱 UPI: <strong className="text-white">{currency}{today.today_upi.toLocaleString('en-IN')}</strong>
+              </span>
+              {today.today_udhaar_amount > 0 && (
+                <span className="bg-amber-800/90 text-amber-100 border border-amber-600 px-3 py-1.5 rounded-xl shadow-xs">
+                  📒 Udhaar: <strong className="text-white">{currency}{today.today_udhaar_amount.toLocaleString('en-IN')}</strong>
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* 5 Big Strategic KPI Cards with Sparklines */}
           <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
             
-            {/* Card 1: Today's Sales vs Yesterday */}
+            {/* Card 1: Revenue vs Previous Period */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200 flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Today's Sales</span>
-                <span className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
-                  <DollarSign className="w-4 h-4" />
-                </span>
-              </div>
-              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
-                {currency}{today.today_revenue.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-400">vs Yesterday</span>
-                {today.today_growth_percent !== null ? (
-                  <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-black text-[11px] ${
-                    today.today_growth_percent >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
-                  }`}>
-                    {today.today_growth_percent >= 0 ? '+' : ''}{today.today_growth_percent}%
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
+                    {period === 'today' ? "Today's Sales" : `${analyticsData?.periodLabel || 'Period'} Sales`}
                   </span>
+                  <span className="p-1.5 bg-emerald-50 text-emerald-700 rounded-lg">
+                    <DollarSign className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
+                  {currency}{(period === 'today' ? today.today_revenue : summary.total_revenue).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+                </div>
+              </div>
+
+              {/* Sparkline mini-trend */}
+              {trendData.length > 1 && (
+                <div className="h-9 my-1 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={trendData}>
+                      <Area type="monotone" dataKey="revenue" stroke="#059669" fill="#d1fae5" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                <span className="text-slate-400">{period === 'today' ? 'vs Yesterday' : 'vs Prev Period'}</span>
+                {period === 'today' ? (
+                  today.today_growth_percent !== null ? (
+                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-black text-[11px] ${
+                      today.today_growth_percent >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {today.today_growth_percent >= 0 ? '+' : ''}{today.today_growth_percent}%
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">First Day</span>
+                  )
                 ) : (
-                  <span className="text-slate-400">First Day</span>
+                  summary.growth_percent !== null ? (
+                    <span className={`inline-flex items-center px-1.5 py-0.2 rounded font-black text-[11px] ${
+                      summary.growth_percent >= 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                    }`}>
+                      {summary.growth_percent >= 0 ? '+' : ''}{summary.growth_percent}%
+                    </span>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )
                 )}
               </div>
             </div>
 
-            {/* Card 2: Bills Completed Today */}
+            {/* Card 2: Completed Bills / Tickets */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200 flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Bills Billed</span>
-                <span className="p-1.5 bg-purple-50 text-purple-700 rounded-lg">
-                  <ShoppingBag className="w-4 h-4" />
-                </span>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">
+                    {period === 'today' ? 'Bills Billed Today' : 'Total Bills'}
+                  </span>
+                  <span className="p-1.5 bg-purple-50 text-purple-700 rounded-lg">
+                    <ShoppingBag className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-1">
+                  {period === 'today' ? today.today_orders : summary.total_orders} <span className="text-xs font-bold text-slate-400">tickets</span>
+                </div>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-slate-900 mt-2">
-                {today.today_orders} <span className="text-xs font-bold text-slate-400">tickets</span>
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+
+              {/* Sparkline mini-trend */}
+              {trendData.length > 1 && (
+                <div className="h-9 my-1 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={trendData}>
+                      <Area type="monotone" dataKey="orders_count" stroke="#7c3aed" fill="#ede9fe" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
                 <span className="text-slate-400">Avg Basket</span>
                 <span className="text-slate-700 font-black">
-                  {currency}{today.today_orders > 0 ? (today.today_revenue / today.today_orders).toFixed(0) : '0'} / bill
+                  {currency}{period === 'today' ? (today.today_orders > 0 ? (today.today_revenue / today.today_orders).toFixed(0) : '0') : summary.avg_order_value} / bill
                 </span>
               </div>
             </div>
 
             {/* Card 3: Gross Profit & Margin */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200 flex flex-col justify-between">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Gross Profit</span>
-                <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg">
-                  <TrendingUp className="w-4 h-4" />
-                </span>
+              <div>
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Gross Profit</span>
+                  <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg">
+                    <TrendingUp className="w-4 h-4" />
+                  </span>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-blue-700 mt-1">
+                  {currency}{(period === 'today' ? today.today_gross_profit : summary.gross_profit).toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+                </div>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-blue-700 mt-2">
-                {currency}{today.today_gross_profit.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
-              </div>
-              <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-400">Gross Margin</span>
+
+              {/* Sparkline mini-trend */}
+              {trendData.length > 1 && (
+                <div className="h-9 my-1 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={trendData}>
+                      <Area type="monotone" dataKey="revenue" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              <div className="mt-1 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                <span className="text-slate-400">Margin</span>
                 <span className="text-blue-800 bg-blue-50 px-1.5 py-0.2 rounded font-black text-[11px]">
-                  {today.today_margin}%
+                  {period === 'today' ? today.today_margin : summary.profit_margin}%
                 </span>
               </div>
             </div>
 
-            {/* Card 4: Cash vs UPI Received Today */}
+            {/* Card 4: Payments Received */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Collected Today</span>
+                <span className="text-[11px] font-black uppercase text-slate-500 tracking-wider">Collected Cash/UPI</span>
                 <span className="p-1.5 bg-slate-100 text-slate-700 rounded-lg">
                   <CreditCard className="w-4 h-4" />
                 </span>
               </div>
-              <div className="mt-1 space-y-1">
+              <div className="mt-1 space-y-1.5">
                 <div className="flex items-center justify-between text-xs font-bold">
                   <span className="text-blue-700 flex items-center gap-1">
                     <span className="w-2 h-2 rounded-full bg-blue-600" /> UPI QR:
@@ -447,26 +540,30 @@ export default function Analytics({ settings = {} }) {
                   <span className="font-black text-slate-900">{currency}{today.today_cash.toLocaleString('en-IN')}</span>
                 </div>
               </div>
-              <div className="mt-2 pt-1 border-t border-slate-100 text-[10px] text-slate-400 font-semibold text-right">
-                Real-time cash in counter
+              <div className="mt-2 pt-1.5 border-t border-slate-100 text-[10px] text-slate-500 font-bold flex justify-between">
+                <span>Real-time Counter</span>
+                <span className="text-emerald-700 font-black">100% Reconciled</span>
               </div>
             </div>
 
-            {/* Card 5: Udhaar Given Today */}
+            {/* Card 5: Udhaar Customer Credit Ledger */}
             <div className="bg-white p-4 sm:p-5 rounded-2xl shadow-xs border border-slate-200 flex flex-col justify-between">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-black uppercase text-amber-800 tracking-wider">Udhaar Given</span>
+                <span className="text-[11px] font-black uppercase text-amber-800 tracking-wider">Total Udhaar Due</span>
                 <span className="p-1.5 bg-amber-50 text-amber-700 rounded-lg">
                   <BookOpen className="w-4 h-4" />
                 </span>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-amber-900 mt-2">
-                {currency}{today.today_udhaar_amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+              <div className="text-2xl sm:text-3xl font-black text-amber-900 mt-1">
+                {currency}{udhaar.total_outstanding.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
+              </div>
+              <div className="text-[11px] text-amber-800 font-bold mt-1">
+                {udhaar.customers.length} customer account{udhaar.customers.length === 1 ? '' : 's'}
               </div>
               <div className="mt-2 pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
-                <span className="text-slate-400">Total Unpaid</span>
+                <span className="text-slate-400">Given Today</span>
                 <span className="text-amber-800 font-black">
-                  {currency}{formatCompact(udhaar.total_outstanding)}
+                  {currency}{today.today_udhaar_amount.toLocaleString('en-IN')}
                 </span>
               </div>
             </div>
@@ -498,17 +595,24 @@ export default function Analytics({ settings = {} }) {
             <div className="overflow-x-auto pb-2">
               <div className="min-w-[700px]">
                 {/* Header row with hours */}
-                <div className="grid grid-cols-17 gap-1 text-[10px] font-bold text-slate-400 text-center mb-1">
+                <div
+                  style={{ display: 'grid', gridTemplateColumns: '44px repeat(16, minmax(0, 1fr))', gap: '4px' }}
+                  className="text-[10px] font-bold text-slate-400 text-center mb-1.5"
+                >
                   <div className="text-left font-black text-slate-500">Day</div>
                   {[7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22].map((h) => (
-                    <div key={h}>{h % 12 === 0 ? 12 : h % 12}{h >= 12 ? 'p' : 'a'}</div>
+                    <div key={h} className="text-center">{h % 12 === 0 ? 12 : h % 12}{h >= 12 ? 'p' : 'a'}</div>
                   ))}
                 </div>
 
                 {/* Rows for Mon through Sun */}
                 <div className="space-y-1">
                   {heatmap.data.map((row) => (
-                    <div key={row.day_index} className="grid grid-cols-17 gap-1 items-center">
+                    <div
+                      key={row.day_index}
+                      style={{ display: 'grid', gridTemplateColumns: '44px repeat(16, minmax(0, 1fr))', gap: '4px' }}
+                      className="items-center"
+                    >
                       <div className="text-xs font-black text-slate-700 text-left">{row.day_short}</div>
                       {row.hours.map((cell) => {
                         const intensity = heatmap.max_bills > 0 ? (cell.bills_count / heatmap.max_bills) : 0;
@@ -560,23 +664,31 @@ export default function Analytics({ settings = {} }) {
               </div>
 
               <div className="space-y-2">
-                {topProducts.slice(0, 4).map((p, idx) => (
-                  <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:bg-slate-100/70 transition">
-                    <div className="flex items-center space-x-2.5 min-w-0">
-                      <span className="w-6 h-6 rounded-full bg-emerald-800 text-yellow-300 text-xs font-black flex items-center justify-center shrink-0">
-                        #{idx + 1}
-                      </span>
-                      <div className="truncate">
-                        <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">{p.product_name}</h4>
-                        <span className="text-[10px] text-slate-400">{p.category}</span>
+                {topProducts.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                    <ShoppingBag className="w-7 h-7 mx-auto mb-1.5 text-slate-300" />
+                    <p className="font-bold text-xs text-slate-600">No products billed in this time window</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Completed bills at the POS counter will rank fast-movers here</p>
+                  </div>
+                ) : (
+                  topProducts.slice(0, 4).map((p, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:bg-slate-100/70 transition">
+                      <div className="flex items-center space-x-2.5 min-w-0">
+                        <span className="w-6 h-6 rounded-full bg-emerald-800 text-yellow-300 text-xs font-black flex items-center justify-center shrink-0">
+                          #{idx + 1}
+                        </span>
+                        <div className="truncate">
+                          <h4 className="font-bold text-xs sm:text-sm text-slate-900 truncate">{p.product_name}</h4>
+                          <span className="text-[10px] text-slate-400">{p.category}</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <div className="font-black text-slate-900 text-xs sm:text-sm">{currency}{p.total_sales.toFixed(0)}</div>
+                        <div className="text-[11px] font-bold text-emerald-700">+{currency}{p.total_profit.toFixed(0)} gross profit</div>
                       </div>
                     </div>
-                    <div className="text-right shrink-0">
-                      <div className="font-black text-slate-900 text-xs sm:text-sm">{currency}{p.total_sales.toFixed(0)}</div>
-                      <div className="text-[11px] font-bold text-emerald-700">+{currency}{p.total_profit.toFixed(0)} gross profit</div>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </div>
 

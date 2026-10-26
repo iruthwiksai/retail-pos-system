@@ -6,7 +6,7 @@ export default function BarcodeModal({ isOpen, onClose, product, settings }) {
 
   const [labelCount, setLabelCount] = useState(8);
   const currency = settings?.currency_symbol || '₹';
-  const storeName = settings?.store_name || 'VijayaLakshmi Minimart';
+  const storeName = settings?.store_name || 'Manidevi General Store';
 
   const handlePrint = () => {
     window.print();

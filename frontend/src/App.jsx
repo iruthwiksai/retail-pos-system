@@ -1,12 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import Navbar from './components/Navbar';
 import PosBilling from './components/PosBilling';
-import OrdersHistory from './components/OrdersHistory';
-import Inventory from './components/Inventory';
-import Analytics from './components/Analytics';
-import SettingsModal from './components/SettingsModal';
 import UpiPaymentModal from './components/UpiPaymentModal';
 import ReceiptModal from './components/ReceiptModal';
+
+// Code-split heavy non-critical modules so POS billing loads instantly on tablets
+const OrdersHistory = lazy(() => import('./components/OrdersHistory'));
+const Inventory = lazy(() => import('./components/Inventory'));
+const Analytics = lazy(() => import('./components/Analytics'));
+const SettingsModal = lazy(() => import('./components/SettingsModal'));
+
+function TabLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center p-12 text-slate-400">
+      <div className="flex items-center space-x-3 bg-white px-6 py-4 rounded-2xl shadow-xs border border-slate-200">
+        <div className="w-5 h-5 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
+        <span className="text-xs font-bold text-slate-700">Loading module...</span>
+      </div>
+    </div>
+  );
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('pos');
@@ -206,24 +219,30 @@ export default function App() {
         )}
 
         {activeTab === 'orders' && (
-          <OrdersHistory
-            onSelectOrder={handleSelectOrderFromHistory}
-            settings={settings}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <OrdersHistory
+              onSelectOrder={handleSelectOrderFromHistory}
+              settings={settings}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'inventory' && (
-          <Inventory
-            products={products}
-            onRefreshProducts={fetchProducts}
-            settings={settings}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <Inventory
+              products={products}
+              onRefreshProducts={fetchProducts}
+              settings={settings}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'analytics' && (
-          <Analytics
-            settings={settings}
-          />
+          <Suspense fallback={<TabLoadingFallback />}>
+            <Analytics
+              settings={settings}
+            />
+          </Suspense>
         )}
       </main>
 
@@ -248,13 +267,17 @@ export default function App() {
         settings={settings}
       />
 
-      {/* Settings Modal */}
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        settings={settings}
-        onSaveSettings={handleSaveSettings}
-      />
+      {/* Settings Modal (Lazy Loaded) */}
+      {isSettingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            settings={settings}
+            onSaveSettings={handleSaveSettings}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

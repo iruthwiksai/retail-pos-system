@@ -36,7 +36,7 @@ export default function Navbar({ activeTab, setActiveTab, settings, onOpenSettin
                 className="text-left group cursor-pointer focus:outline-none whitespace-nowrap hidden lg:block"
               >
                 <span className="font-black text-lg xl:text-2xl tracking-tight text-white group-hover:text-yellow-300 transition">
-                  {settings.store_name || 'VijayaLakshmi Minimart'}
+                  {settings.store_name || 'Manidevi General Store'}
                 </span>
               </button>
             </div>

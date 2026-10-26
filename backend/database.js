@@ -111,12 +111,12 @@ function initDatabase() {
 
   // Initialize default settings if missing
   const defaultSettings = [
-    { key: 'store_name', value: 'VijayaLakshmi Minimart' },
+    { key: 'store_name', value: 'Manidevi General Store' },
     { key: 'store_tagline', value: 'Fresh Grocery & Daily Essentials' },
     { key: 'store_address', value: 'Main Market Road, Near City Center' },
     { key: 'store_phone', value: '+91 98765 43210' },
-    { key: 'upi_id', value: 'vijayalakshmi@upi' },
-    { key: 'upi_name', value: 'VijayaLakshmi Minimart' },
+    { key: 'upi_id', value: 'manidevi@upi' },
+    { key: 'upi_name', value: 'Manidevi General Store' },
     { key: 'gstin', value: '27AABCS1429B1ZB' },
     { key: 'currency_symbol', value: '₹' },
     { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' }
@@ -129,11 +129,138 @@ function initDatabase() {
     }
   });
   setMany(defaultSettings);
+  db.prepare("UPDATE settings SET value = 'Manidevi General Store' WHERE key = 'store_name' AND value IN ('VijayaLakshmi Minimart', 'DMart Local Supermarket')").run();
+  db.prepare("UPDATE settings SET value = 'Manidevi General Store' WHERE key = 'upi_name' AND value IN ('VijayaLakshmi Minimart', 'Smart Supermarket')").run();
 
   // Seed sample products if catalog is empty
   const count = db.prepare('SELECT COUNT(*) as count FROM products').get().count;
   if (count === 0) {
     seedProducts();
+  }
+
+  // Only seed demo sales if explicitly enabled via environment variable
+  if (process.env.SEED_DEMO === 'true') {
+    ensureLiveSalesData(db);
+  }
+}
+
+function ensureLiveSalesData(db) {
+  try {
+    const todayOrdersCount = db.prepare("SELECT COUNT(*) as count FROM orders WHERE date(created_at, 'localtime') = date('now', 'localtime')").get().count;
+    const yesterdayOrdersCount = db.prepare("SELECT COUNT(*) as count FROM orders WHERE date(created_at, 'localtime') = date('now', 'localtime', '-1 day')").get().count;
+
+    const products = db.prepare("SELECT * FROM products WHERE COALESCE(is_active, 1) = 1").all();
+    if (products.length === 0) return;
+
+    const insertOrder = db.prepare(`
+      INSERT INTO orders (
+        order_number, customer_name, customer_phone, total_mrp, subtotal, 
+        discount, total_amount, total_savings, payment_method, payment_status, 
+        upi_reference, cashier_notes, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const insertItem = db.prepare(`
+      INSERT INTO order_items (
+        order_id, product_id, product_name, barcode, unit, quantity, 
+        cost_price, mrp, selling_price, item_total, savings
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const pad = (n) => String(n).padStart(2, '0');
+
+    const generateOrder = (dateObj, hour, minute, customer, payMode, payStatus, productIndices) => {
+      const dStr = `${dateObj.getFullYear()}-${pad(dateObj.getMonth() + 1)}-${pad(dateObj.getDate())}`;
+      const tStr = `${pad(hour)}:${pad(minute)}:00`;
+      const createdAt = `${dStr} ${tStr}`;
+      const numCode = `${dStr.replace(/-/g, '')}-${String(Math.floor(Math.random() * 800) + 100).padStart(4, '0')}`;
+      const orderNumber = `VL-${numCode}`;
+
+      let totalMrp = 0;
+      let subtotal = 0;
+      const itemsData = [];
+
+      for (const idx of productIndices) {
+        const prod = products[idx % products.length];
+        const qty = prod.unit === 'kg' ? 1.5 : 2;
+        const itemTotal = Number((prod.selling_price * qty).toFixed(2));
+        const itemMrpTotal = Number((prod.mrp * qty).toFixed(2));
+        const itemSavings = Number((itemMrpTotal - itemTotal).toFixed(2));
+
+        totalMrp += itemMrpTotal;
+        subtotal += itemTotal;
+
+        itemsData.push({
+          product_id: prod.id,
+          product_name: prod.name,
+          barcode: prod.barcode,
+          unit: prod.unit,
+          quantity: qty,
+          cost_price: prod.cost_price,
+          mrp: prod.mrp,
+          selling_price: prod.selling_price,
+          item_total: itemTotal,
+          savings: itemSavings
+        });
+      }
+
+      const totalAmount = subtotal;
+      const totalSavings = Number((totalMrp - totalAmount).toFixed(2));
+      const upiRef = payMode === 'UPI' ? `UPI/${Date.now().toString().slice(-8)}` : null;
+
+      const res = insertOrder.run(
+        orderNumber,
+        customer.name,
+        customer.phone,
+        totalMrp,
+        subtotal,
+        0,
+        totalAmount,
+        totalSavings,
+        payMode,
+        payStatus,
+        upiRef,
+        'Regular counter sale',
+        createdAt
+      );
+
+      const orderId = res.lastInsertRowid;
+      for (const it of itemsData) {
+        insertItem.run(
+          orderId,
+          it.product_id,
+          it.product_name,
+          it.barcode,
+          it.unit,
+          it.quantity,
+          it.cost_price,
+          it.mrp,
+          it.selling_price,
+          it.item_total,
+          it.savings
+        );
+      }
+    };
+
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    if (yesterdayOrdersCount < 3) {
+      generateOrder(yesterday, 10, 15, { name: 'Ramesh Patel', phone: '9820112233' }, 'UPI', 'PAID', [0, 2]);
+      generateOrder(yesterday, 12, 30, { name: 'Priya Sharma', phone: '9876543210' }, 'CASH', 'PAID', [1, 3, 4]);
+      generateOrder(yesterday, 17, 45, { name: 'Amit Kulkarni', phone: '9890123456' }, 'UPI', 'PAID', [2, 5]);
+      generateOrder(yesterday, 19, 10, { name: 'Sunita Verma', phone: '9765432190' }, 'CASH', 'PAID', [0, 6, 7]);
+    }
+
+    if (todayOrdersCount < 3) {
+      generateOrder(now, 9, 30, { name: 'Walk-in Customer', phone: '' }, 'CASH', 'PAID', [0, 1]);
+      generateOrder(now, 11, 15, { name: 'Deepak Deshmukh', phone: '9988776655' }, 'UPI', 'PAID', [2, 3, 5]);
+      generateOrder(now, 14, 20, { name: 'Neha Gupta', phone: '9822334455' }, 'UPI', 'PAID', [4, 6]);
+      generateOrder(now, 17, 0, { name: 'Kavita Rao', phone: '9845112233' }, 'CASH', 'PAID', [1, 7]);
+      generateOrder(now, 18, 30, { name: 'Suresh Patil', phone: '9811223344' }, 'UDHAAR', 'UNPAID', [0, 3]);
+    }
+  } catch (err) {
+    console.error('Error ensuring live sales data:', err.message);
   }
 }
 
