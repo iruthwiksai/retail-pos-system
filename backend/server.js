@@ -2,6 +2,9 @@ process.env.TZ = process.env.TZ || 'Asia/Kolkata';
 
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const db = require('./database');
@@ -9,8 +12,73 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-app.use(cors());
-app.use(express.json());
+// 1. Security Headers (Helmet)
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false
+}));
+
+// 2. HTTP Payload Compression (Gzip / Brotli reduces payload by up to 65-70%)
+app.use(compression({
+  threshold: 1024,
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
+
+// 3. CORS Policy (Restricted in production)
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+  ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim())
+  : null;
+
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || !allowedOrigins || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    callback(new Error('Blocked by CORS policy'));
+  },
+  credentials: true
+}));
+
+app.use(express.json({ limit: '2mb' }));
+
+// 4. Rate Limiting
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests. Please wait a moment.' }
+});
+app.use('/api', generalLimiter);
+
+const sensitiveActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Action rate limit reached. Please wait 1 minute.' }
+});
+
+// 5. Manager PIN Protection Middleware
+function requireManagerPin(req, res, next) {
+  const pinFromHeader = req.headers['x-manager-pin'];
+  const pinFromBody = req.body?.manager_pin;
+  const pinFromQuery = req.query?.manager_pin;
+  const providedPin = (pinFromHeader || pinFromBody || pinFromQuery || '').toString().trim();
+
+  const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
+  const configuredPin = configuredPinRow?.value || '1234';
+
+  if (!providedPin || providedPin !== configuredPin) {
+    return res.status(401).json({
+      error: 'Manager PIN required or invalid. Please provide the 4-digit Manager PIN (default: 1234).'
+    });
+  }
+  next();
+}
 
 // Helper to get today's date string in IST format (YYYYMMDD)
 function getTodayISTDateStr() {
@@ -119,10 +187,11 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'upi_name',
   'gstin',
   'currency_symbol',
-  'receipt_footer_msg'
+  'receipt_footer_msg',
+  'manager_pin'
 ]);
 
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', sensitiveActionLimiter, requireManagerPin, (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Invalid settings body' });
@@ -134,6 +203,14 @@ app.post('/api/settings', (req, res) => {
       const upiRegex = /^[\w.\-_]{2,256}@[a-zA-Z]{2,64}$/;
       if (!upiRegex.test(upiStr)) {
         return res.status(400).json({ error: 'Invalid UPI ID format. Expected format: name@bank (e.g. shop@okaxis or 9876543210@upi)' });
+      }
+    }
+
+    // Validate Manager PIN if updated
+    if (req.body.manager_pin) {
+      const pinStr = String(req.body.manager_pin).trim();
+      if (!/^\d{4}$/.test(pinStr)) {
+        return res.status(400).json({ error: 'Manager PIN must be a 4-digit number (e.g. 1234)' });
       }
     }
 
@@ -267,7 +344,7 @@ app.put('/api/products/:id', (req, res) => {
   }
 });
 
-app.delete('/api/products/:id', (req, res) => {
+app.delete('/api/products/:id', sensitiveActionLimiter, requireManagerPin, (req, res) => {
   try {
     const { id } = req.params;
     const salesCountRow = db.prepare('SELECT COUNT(*) as count FROM order_items WHERE product_id = ?').get(id);
@@ -425,7 +502,7 @@ app.get('/api/inventory/logs', (req, res) => {
 });
 
 // ----------------- ORDERS / BILLING API -----------------
-app.post('/api/orders', (req, res) => {
+app.post('/api/orders', sensitiveActionLimiter, (req, res) => {
   try {
     const { items, customer_name, customer_phone, payment_method, payment_status, upi_reference, cashier_notes } = req.body;
 
@@ -1362,7 +1439,7 @@ app.patch('/api/orders/:id/status', (req, res) => {
   }
 });
 
-app.delete('/api/orders/:id', (req, res) => {
+app.delete('/api/orders/:id', sensitiveActionLimiter, requireManagerPin, (req, res) => {
   try {
     const { id } = req.params;
     const order = db.prepare('SELECT * FROM orders WHERE id = ? OR order_number = ?').get(id, id);
@@ -1398,6 +1475,23 @@ app.delete('/api/orders/:id', (req, res) => {
 
     restockTx();
     res.json({ success: true, message: `Order ${order.order_number} cancelled and items restocked to inventory` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ----------------- DATABASE BACKUP & RESTORE API -----------------
+app.get('/api/backup/download', requireManagerPin, (req, res) => {
+  try {
+    const dbPath = path.resolve(__dirname, 'retail_pos.db');
+    if (!fs.existsSync(dbPath)) {
+      return res.status(404).json({ error: 'Database file not found on server' });
+    }
+    const dateStr = getTodayISTDateStr();
+    res.setHeader('Content-Disposition', `attachment; filename="manidevi_retail_backup_${dateStr}.db"`);
+    res.setHeader('Content-Type', 'application/vnd.sqlite3');
+    const fileStream = fs.createReadStream(dbPath);
+    fileStream.pipe(res);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -65,19 +65,25 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
     }
   };
 
-  // Void / Cancel order
+  // Void / Cancel order with Manager PIN protection
   const handleCancelOrder = async (orderId, orderNum) => {
-    if (window.confirm(`Void order ${orderNum}? This will restore all items back into stock.`)) {
-      try {
-        const res = await fetch(`/api/orders/${orderId}`, { method: 'DELETE' });
-        if (res.ok) {
-          fetchOrders();
-        } else {
-          alert('Failed to cancel order');
-        }
-      } catch (err) {
-        alert(err.message);
+    const pin = window.prompt(`Enter 4-digit Manager PIN to void/cancel order ${orderNum}:`, '1234');
+    if (!pin) return;
+
+    try {
+      const res = await fetch(`/api/orders/${orderId}`, {
+        method: 'DELETE',
+        headers: { 'x-manager-pin': pin }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || `Order ${orderNum} cancelled and stock restored`);
+        fetchOrders();
+      } else {
+        alert(data.error || 'Failed to cancel order');
       }
+    } catch (err) {
+      alert(err.message);
     }
   };
 

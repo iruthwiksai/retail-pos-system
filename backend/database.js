@@ -96,6 +96,20 @@ function initDatabase() {
     // Column already exists
   }
 
+  // Performance Composite & Filter Indices for instant queries at high order volumes
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at);
+    CREATE INDEX IF NOT EXISTS idx_orders_payment_status ON orders(payment_status);
+    CREATE INDEX IF NOT EXISTS idx_orders_order_number ON orders(order_number);
+    CREATE INDEX IF NOT EXISTS idx_orders_created_status ON orders(created_at, payment_status);
+    CREATE INDEX IF NOT EXISTS idx_order_items_order_id ON order_items(order_id);
+    CREATE INDEX IF NOT EXISTS idx_order_items_product_id ON order_items(product_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_logs_product_id ON stock_logs(product_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_logs_change_type ON stock_logs(change_type);
+    CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
+    CREATE INDEX IF NOT EXISTS idx_products_is_active ON products(is_active);
+  `);
+
   // Seed default suppliers
   const defaultSuppliers = [
     'Metro Cash & Carry Wholesale',
@@ -119,7 +133,8 @@ function initDatabase() {
     { key: 'upi_name', value: 'Manidevi General Store' },
     { key: 'gstin', value: '27AABCS1429B1ZB' },
     { key: 'currency_symbol', value: '₹' },
-    { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' }
+    { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' },
+    { key: 'manager_pin', value: '1234' }
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');

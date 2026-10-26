@@ -179,16 +179,23 @@ export default function App() {
 
   const handleSaveSettings = async (newSettings) => {
     try {
+      const pin = newSettings.manager_pin || settings.manager_pin || '1234';
       const res = await fetch('/api/settings', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-manager-pin': pin
+        },
         body: JSON.stringify(newSettings)
       });
       if (res.ok) {
         setSettings(newSettings);
+      } else {
+        const err = await res.json();
+        alert(err.error || 'Failed to save settings');
       }
     } catch (err) {
-      alert('Failed to save settings');
+      alert('Failed to save settings: ' + err.message);
     }
   };
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Settings, Store, QrCode, Save, Check } from 'lucide-react';
+import { X, Settings, Store, QrCode, Save, Check, ShieldCheck, Download } from 'lucide-react';
 
 export default function SettingsModal({ isOpen, onClose, settings, onSaveSettings }) {
   if (!isOpen) return null;
@@ -13,7 +13,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
     upi_name: '',
     gstin: '',
     receipt_footer_msg: '',
-    currency_symbol: '₹'
+    currency_symbol: '₹',
+    manager_pin: '1234'
   });
   const [saved, setSaved] = useState(false);
 
@@ -28,7 +29,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
         upi_name: settings.upi_name || 'Manidevi General Store',
         gstin: settings.gstin || '27AABCS1429B1ZB',
         receipt_footer_msg: settings.receipt_footer_msg || 'Thank You For Shopping With Us! Visit Again.',
-        currency_symbol: settings.currency_symbol || '₹'
+        currency_symbol: settings.currency_symbol || '₹',
+        manager_pin: settings.manager_pin || '1234'
       });
     }
   }, [settings]);
@@ -183,6 +185,47 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
                 onChange={handleChange}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
+            </div>
+
+            {/* Manager Security PIN */}
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-amber-700" />
+                  <span>4-Digit Manager Security PIN</span>
+                </span>
+                <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
+                  Protects Settings & Voids
+                </span>
+              </div>
+              <input
+                type="password"
+                maxLength={4}
+                name="manager_pin"
+                value={formData.manager_pin}
+                onChange={handleChange}
+                placeholder="1234"
+                className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl font-mono text-center tracking-widest text-lg font-black focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+              <p className="text-[11px] text-amber-800">
+                Required for modifying settings, deleting products, or voiding saved bills. Default: <strong>1234</strong>
+              </p>
+            </div>
+
+            {/* 1-Click Database Backup */}
+            <div className="pt-2 border-t border-slate-200 flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-800">1-Click SQLite DB Backup</span>
+                <p className="text-[10px] text-slate-400">Download snapshot of all products, stock & bills</p>
+              </div>
+              <a
+                href={`/api/backup/download?manager_pin=${formData.manager_pin || '1234'}`}
+                download
+                className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 flex items-center space-x-1.5 shadow-2xs transition"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Download .db Backup</span>
+              </a>
             </div>
           </div>
 

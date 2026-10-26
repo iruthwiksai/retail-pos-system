@@ -42,17 +42,23 @@ export default function Inventory({ products, onRefreshProducts, settings }) {
   });
 
   const handleDelete = async (id, name) => {
-    if (window.confirm(`Are you sure you want to delete "${name}" from inventory?`)) {
-      try {
-        const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
-        if (res.ok) {
-          onRefreshProducts();
-        } else {
-          alert('Failed to delete product');
-        }
-      } catch (err) {
-        alert(err.message);
+    const pin = window.prompt(`Enter 4-digit Manager PIN to delete/archive "${name}":`, '1234');
+    if (!pin) return;
+
+    try {
+      const res = await fetch(`/api/products/${id}`, {
+        method: 'DELETE',
+        headers: { 'x-manager-pin': pin }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || 'Product removed from catalog');
+        onRefreshProducts();
+      } else {
+        alert(data.error || 'Failed to delete product');
       }
+    } catch (err) {
+      alert(err.message);
     }
   };
 
