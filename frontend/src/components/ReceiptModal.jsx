@@ -19,10 +19,12 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
 
   const parseDate = (d) => {
     if (!d) return new Date();
-    const str = typeof d === 'string' && !d.includes('Z') && !d.includes('+')
-      ? d.replace(' ', 'T') + 'Z'
-      : d;
-    return new Date(str);
+    if (d instanceof Date) return d;
+    if (typeof d === 'string') {
+      if (d.includes('Z') || d.includes('+')) return new Date(d);
+      return new Date(d.replace(' ', 'T'));
+    }
+    return new Date(d);
   };
 
   const orderDate = parseDate(order.created_at);

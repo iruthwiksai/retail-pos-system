@@ -236,6 +236,53 @@ export default function Analytics({ settings = {}, onGoToPos }) {
     );
   }, [udhaar.customers, udhaarSearch]);
 
+  // Top product champions (Units, Revenue, and Profit Leaders)
+  const champions = analyticsData?.champions || {
+    byUnits: topProducts.length > 0 ? [...topProducts].sort((a, b) => b.total_qty - a.total_qty)[0] : null,
+    byRevenue: topProducts.length > 0 ? [...topProducts].sort((a, b) => b.total_sales - a.total_sales)[0] : null,
+    byProfit: topProducts.length > 0 ? [...topProducts].sort((a, b) => b.total_profit - a.total_profit)[0] : null
+  };
+
+  // Dedicated coordinate tooltip for line, area, and combo charts (explicit X & Y)
+  const CoordinateTooltip = ({ active, payload, label, isCompact = false }) => {
+    if (!active || !payload || !payload.length) return null;
+    return (
+      <div className="bg-slate-900/95 backdrop-blur-xs text-white text-xs p-3 rounded-xl shadow-2xl border border-slate-700 min-w-[200px] space-y-1.5 animate-fadeIn z-50">
+        <div className="flex items-center justify-between pb-1.5 border-b border-slate-800">
+          <span className="text-[10px] font-mono uppercase text-emerald-400 font-black flex items-center gap-1">
+            <span>📍</span> Coordinate Point
+          </span>
+          <span className="text-[11px] font-mono font-bold text-slate-200">
+            X: {label || 'Point'}
+          </span>
+        </div>
+        <div className="space-y-1 pt-0.5">
+          {payload.map((entry, idx) => {
+            const formattedVal =
+              entry.name === 'Bills Billed' || entry.name === 'Bill Velocity' || entry.name === 'Footfall' || entry.dataKey === 'orders_count'
+                ? `${entry.value} bills`
+                : `${currency}${Number(entry.value).toLocaleString('en-IN')}`;
+            const dotColor = entry.color || entry.stroke || entry.fill || '#10B981';
+            return (
+              <div key={idx} className="flex items-center justify-between gap-3 text-xs">
+                <span className="flex items-center gap-1.5 font-bold" style={{ color: dotColor }}>
+                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: dotColor }} />
+                  <span>{entry.name || 'Value'}:</span>
+                </span>
+                <span className="font-mono font-black text-white text-right">
+                  {formattedVal}
+                  <span className="text-[10px] text-slate-400 ml-1.5 font-mono font-normal">
+                    (Y: {Number(entry.value).toLocaleString('en-IN')})
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // Average revenue line calculation
   const avgPeriodSales = trendData.length > 0
     ? trendData.reduce((acc, t) => acc + (t.revenue || 0), 0) / trendData.length
@@ -466,7 +513,8 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                 <div className="h-9 my-1.5 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trendData}>
-                      <Area type="monotone" dataKey="revenue" stroke="#059669" fill="#d1fae5" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Tooltip content={<CoordinateTooltip isCompact />} />
+                      <Area type="monotone" dataKey="revenue" name="Sales" stroke="#059669" fill="#d1fae5" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -516,7 +564,8 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                 <div className="h-9 my-1.5 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trendData}>
-                      <Area type="monotone" dataKey="revenue" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Tooltip content={<CoordinateTooltip isCompact />} />
+                      <Area type="monotone" dataKey="profit" name="Gross Profit" stroke="#2563eb" fill="#dbeafe" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -550,7 +599,8 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                 <div className="h-9 my-1.5 w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trendData}>
-                      <Area type="monotone" dataKey="orders_count" stroke="#7c3aed" fill="#ede9fe" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      <Tooltip content={<CoordinateTooltip isCompact />} />
+                      <Area type="monotone" dataKey="orders_count" name="Bills Billed" stroke="#7c3aed" fill="#ede9fe" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 5 }} isAnimationActive={false} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
@@ -637,19 +687,14 @@ export default function Analytics({ settings = {}, onGoToPos }) {
               <div className="h-72 sm:h-80 w-full min-h-[250px]">
                 {trendData.length > 0 && hasSalesInPeriod ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={trendData} margin={{ top: 10, right: 10, left: -15, bottom: 5 }}>
+                    <ComposedChart data={trendData} margin={{ top: 10, right: 15, left: -15, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                       <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748B' }} />
                       <YAxis
                         tick={{ fontSize: 11, fill: '#64748B' }}
                         tickFormatter={(val) => metricToggle === 'bills' ? val : formatCompact(val)}
                       />
-                      <Tooltip
-                        formatter={(val, name) => [
-                          name === 'Bills Billed' ? `${val} bills` : `${currency}${Number(val).toLocaleString('en-IN')}`,
-                          name
-                        ]}
-                      />
+                      <Tooltip content={<CoordinateTooltip />} />
                       {metricToggle === 'revenue' ? (
                         <>
                           <ReferenceLine
@@ -659,9 +704,29 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                             label={{ value: `Avg: ${formatCompact(avgPeriodSales)}`, fill: '#D97706', fontSize: 10, position: 'right' }}
                           />
                           <Bar dataKey="revenue" name="Gross Sales" fill="#007A3D" radius={[6, 6, 0, 0]} />
+                          <Line
+                            type="monotone"
+                            dataKey="profit"
+                            name="Gross Profit"
+                            stroke="#D97706"
+                            strokeWidth={2.5}
+                            dot={{ r: 4, stroke: '#B45309', strokeWidth: 1.5, fill: '#FEF3C7' }}
+                            activeDot={{ r: 7, stroke: '#92400E', strokeWidth: 2, fill: '#F59E0B' }}
+                          />
                         </>
                       ) : (
-                        <Bar dataKey="orders_count" name="Bills Billed" fill="#3B82F6" radius={[6, 6, 0, 0]} />
+                        <>
+                          <Bar dataKey="orders_count" name="Bills Billed" fill="#3B82F6" radius={[6, 6, 0, 0]} />
+                          <Line
+                            type="monotone"
+                            dataKey="orders_count"
+                            name="Bill Velocity"
+                            stroke="#1D4ED8"
+                            strokeWidth={2}
+                            dot={{ r: 4, stroke: '#1E40AF', strokeWidth: 1.5, fill: '#DBEAFE' }}
+                            activeDot={{ r: 7, stroke: '#1E3A8A', strokeWidth: 2, fill: '#3B82F6' }}
+                          />
+                        </>
                       )}
                     </ComposedChart>
                   </ResponsiveContainer>
@@ -991,13 +1056,8 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
                     <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748B' }} />
                     <YAxis tick={{ fontSize: 10, fill: '#64748B' }} />
-                    <Tooltip
-                      formatter={(val, name, item) => [
-                        `${val} bills (${currency}${item.payload.revenue.toLocaleString('en-IN')})`,
-                        'Footfall'
-                      ]}
-                    />
-                    <Bar dataKey="orders_count" fill="#007A3D" radius={[5, 5, 0, 0]} />
+                    <Tooltip content={<CoordinateTooltip />} />
+                    <Bar dataKey="orders_count" name="Footfall" fill="#007A3D" radius={[5, 5, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
@@ -1017,11 +1077,90 @@ export default function Analytics({ settings = {}, onGoToPos }) {
       {!loading && activeTab === 'products' && (
         <div className="space-y-6">
 
+          {/* Top Performer Champion Highlights: Units, Revenue, and Margin Leaders */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            
+            {/* 1. Highest Selling by Units */}
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50/60 p-4 sm:p-5 rounded-2xl border-2 border-blue-200 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md border border-blue-300 flex items-center gap-1">
+                  <span>🥇</span> Volume Leader
+                </span>
+                <span className="text-xs text-blue-700 font-extrabold">Highest Selling (Units)</span>
+              </div>
+              <div>
+                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byUnits?.product_name || '—'}>
+                  {champions.byUnits?.product_name || 'No sales recorded'}
+                </h4>
+                <div className="text-2xl sm:text-3xl font-black text-blue-950 mt-1">
+                  {champions.byUnits ? `${champions.byUnits.total_qty} ${champions.byUnits.unit || 'units'}` : '0 units'}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-blue-200/80 flex items-center justify-between text-xs text-blue-900 font-semibold">
+                <span>{champions.byUnits?.times_ordered || 0} customer bills</span>
+                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-blue-200 text-blue-800">
+                  {champions.byUnits?.category || '—'}
+                </span>
+              </div>
+            </div>
+
+            {/* 2. Product Yielding Highest Revenue */}
+            <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 p-4 sm:p-5 rounded-2xl border-2 border-emerald-300 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1">
+                  <span>💰</span> Revenue Leader
+                </span>
+                <span className="text-xs text-emerald-700 font-extrabold">Top Gross Revenue</span>
+              </div>
+              <div>
+                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byRevenue?.product_name || '—'}>
+                  {champions.byRevenue?.product_name || 'No sales recorded'}
+                </h4>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-950 mt-1">
+                  {currency}{champions.byRevenue ? Number(champions.byRevenue.total_sales).toLocaleString('en-IN') : 0}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-emerald-200/80 flex items-center justify-between text-xs text-emerald-900 font-semibold">
+                <span>Profit: +{currency}{champions.byRevenue ? Number(champions.byRevenue.total_profit).toFixed(0) : 0}</span>
+                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800">
+                  {champions.byRevenue?.category || '—'}
+                </span>
+              </div>
+            </div>
+
+            {/* 3. Product Yielding Highest Profit Margin */}
+            <div className="bg-gradient-to-br from-amber-50 to-yellow-50/60 p-4 sm:p-5 rounded-2xl border-2 border-amber-300 shadow-2xs space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1">
+                  <span>📈</span> Profit Leader
+                </span>
+                <span className="text-xs text-amber-700 font-extrabold">Top Profit Yielding</span>
+              </div>
+              <div>
+                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byProfit?.product_name || '—'}>
+                  {champions.byProfit?.product_name || 'No sales recorded'}
+                </h4>
+                <div className="text-2xl sm:text-3xl font-black text-amber-950 mt-1">
+                  +{currency}{champions.byProfit ? Number(champions.byProfit.total_profit).toLocaleString('en-IN') : 0}
+                </div>
+              </div>
+              <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs text-amber-900 font-semibold">
+                <span>Gross Margin: <strong className="text-amber-950 font-black">{champions.byProfit?.margin_percent || 0}%</strong></span>
+                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-amber-200 text-amber-800">
+                  {champions.byProfit?.category || '—'}
+                </span>
+              </div>
+            </div>
+
+          </div>
+
           {/* Categories: Horizontal Bar Chart Sorted by Revenue with Margin % */}
           <div className="bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4">
             <div>
-              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Category Performance & Margin Contribution</h3>
-              <p className="text-xs text-slate-400">Horizontal bars sorted by revenue with Gross Margin % directly labeled</p>
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide flex items-center gap-2">
+                <span>🏆 Fast-Mover Categories & Margin Contribution</span>
+              </h3>
+              <p className="text-xs text-slate-400">Horizontal bars ranked by volume and revenue with Gross Margin % directly labeled</p>
             </div>
 
             <div className="h-72 w-full min-h-[260px]">
@@ -1063,8 +1202,8 @@ export default function Analytics({ settings = {}, onGoToPos }) {
             {/* Top Best Sellers */}
             <div className="lg:col-span-6 bg-white p-5 rounded-2xl shadow-xs border border-slate-200 space-y-4 overflow-hidden">
               <div className="flex items-center justify-between">
-                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">🏆 Best-Selling Products</h3>
-                <span className="text-xs text-slate-400 font-semibold">Ranked by revenue</span>
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">🏆 Fast-Moving Best Sellers</h3>
+                <span className="text-xs text-slate-400 font-semibold">Ranked by revenue & volume</span>
               </div>
 
               <div className="overflow-x-auto">
@@ -1072,6 +1211,7 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                   <thead className="bg-slate-50 border-b border-slate-200 uppercase font-black text-[10px] text-slate-500">
                     <tr>
                       <th className="py-2.5 px-3">Item</th>
+                      <th className="py-2.5 px-2 text-center">Orders</th>
                       <th className="py-2.5 px-2 text-center">Units</th>
                       <th className="py-2.5 px-3 text-right">Revenue</th>
                       <th className="py-2.5 px-3 text-right">Profit</th>
@@ -1080,18 +1220,24 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                   <tbody className="divide-y divide-slate-100">
                     {topProducts.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="py-8 text-center text-slate-400">No product sales yet.</td>
+                        <td colSpan="5" className="py-8 text-center text-slate-400">No product sales yet.</td>
                       </tr>
                     ) : (
                       topProducts.slice(0, 8).map((p, idx) => (
                         <tr key={idx} className="hover:bg-slate-50 transition">
-                          <td className="py-2.5 px-3 font-bold text-slate-900 truncate max-w-[180px]" title={p.product_name}>
-                            <span className="text-slate-400 mr-1.5">#{idx + 1}</span>
+                          <td className="py-2.5 px-3 font-bold text-slate-900 truncate max-w-[170px]" title={p.product_name}>
+                            <span className="text-slate-400 mr-1.5 font-mono">#{idx + 1}</span>
                             {p.product_name}
+                          </td>
+                          <td className="py-2.5 px-2 text-center font-bold text-slate-700">
+                            {p.times_ordered || 1}
                           </td>
                           <td className="py-2.5 px-2 text-center font-bold text-slate-800">{p.total_qty}</td>
                           <td className="py-2.5 px-3 text-right font-black text-slate-900">{currency}{p.total_sales.toFixed(0)}</td>
-                          <td className="py-2.5 px-3 text-right font-black text-emerald-700">+{currency}{p.total_profit.toFixed(0)}</td>
+                          <td className="py-2.5 px-3 text-right font-black text-emerald-700">
+                            +{currency}{p.total_profit.toFixed(0)}
+                            <span className="block text-[10px] text-emerald-600 font-semibold">({p.margin_percent}%)</span>
+                          </td>
                         </tr>
                       ))
                     )}
@@ -1117,6 +1263,7 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                   <thead className="bg-slate-50 border-b border-slate-200 uppercase font-black text-[10px] text-slate-500">
                     <tr>
                       <th className="py-2.5 px-3">Item</th>
+                      <th className="py-2.5 px-2 text-center">Times Ordered</th>
                       <th className="py-2.5 px-2 text-center">Sold</th>
                       <th className="py-2.5 px-2 text-center">Leftover</th>
                       <th className="py-2.5 px-3 text-right">Status</th>
@@ -1125,13 +1272,16 @@ export default function Analytics({ settings = {}, onGoToPos }) {
                   <tbody className="divide-y divide-slate-100">
                     {slowProducts.length === 0 ? (
                       <tr>
-                        <td colSpan="4" className="py-8 text-center text-slate-400">No inventory products registered.</td>
+                        <td colSpan="5" className="py-8 text-center text-slate-400">No inventory products registered.</td>
                       </tr>
                     ) : (
                       slowProducts.map((p, idx) => (
                         <tr key={idx} className="hover:bg-slate-50 transition">
-                          <td className="py-2.5 px-3 font-bold text-slate-900 truncate max-w-[160px]" title={p.name}>
+                          <td className="py-2.5 px-3 font-bold text-slate-900 truncate max-w-[150px]" title={p.name}>
                             {p.name}
+                          </td>
+                          <td className="py-2.5 px-2 text-center font-bold text-slate-700">
+                            {p.times_ordered || 0} {p.times_ordered === 1 ? 'bill' : 'bills'}
                           </td>
                           <td className="py-2.5 px-2 text-center font-bold text-amber-900">{p.units_sold} {p.unit}</td>
                           <td className="py-2.5 px-2 text-center font-bold text-slate-800">{p.stock} {p.unit}</td>

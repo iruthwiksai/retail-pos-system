@@ -158,6 +158,19 @@ function initDatabase() {
   if (ordersCount === 0 || process.env.SEED_DEMO === 'true') {
     ensureInitialSalesHistory(db);
   }
+
+  // Strict invariant: Ensure NO bills of future time ever exist in the database
+  try {
+    const futureOrders = db.prepare("SELECT id FROM orders WHERE datetime(created_at, 'localtime') > datetime('now', 'localtime')").all();
+    if (futureOrders.length > 0) {
+      console.log(`Purging ${futureOrders.length} future-dated orders from database...`);
+      const orderIds = futureOrders.map(o => o.id);
+      db.prepare(`DELETE FROM order_items WHERE order_id IN (${orderIds.join(',')})`).run();
+      db.prepare(`DELETE FROM orders WHERE id IN (${orderIds.join(',')})`).run();
+    }
+  } catch (e) {
+    console.warn('Future orders cleanup notice:', e.message);
+  }
 }
 
 function ensureInitialSalesHistory(db) {
@@ -321,12 +334,26 @@ function ensureInitialSalesHistory(db) {
       generateOrder(yesterday, 19, 40, { name: 'Deepak Deshmukh', phone: '9988776655' }, 'UPI', 'PAID', [3, 8]);
       generateOrder(yesterday, 20, 30, { name: 'Walk-in Customer', phone: '' }, 'CASH', 'PAID', [1, 2]);
 
-      // 4. Generate Today's active counter orders (Live ticker)
-      generateOrder(now, 9, 30, { name: 'Walk-in Customer', phone: '' }, 'CASH', 'PAID', [0, 1]);
-      generateOrder(now, 11, 15, { name: 'Deepak Deshmukh', phone: '9988776655' }, 'UPI', 'PAID', [2, 3, 5]);
-      generateOrder(now, 14, 20, { name: 'Neha Gupta', phone: '9822334455' }, 'UPI', 'PAID', [4, 6]);
-      generateOrder(now, 17, 0, { name: 'Kavita Rao', phone: '9845112233' }, 'CASH', 'PAID', [1, 7]);
-      generateOrder(now, 19, 15, { name: 'Amit Kulkarni', phone: '9890123456' }, 'UPI', 'PAID', [0, 4, 8]);
+      // 4. Generate Today's active counter orders strictly in the past
+      // Invariant: NEVER generate a bill in the future
+      const currentHour = now.getHours();
+      const currentMin = now.getMinutes();
+      const todayCandidates = [
+        { hour: 7, min: 15, cust: { name: 'Walk-in Customer', phone: '' }, mode: 'CASH', picks: [0, 1] },
+        { hour: 7, min: 45, cust: { name: 'Deepak Deshmukh', phone: '9988776655' }, mode: 'UPI', picks: [2, 3, 5] },
+        { hour: 8, min: 5, cust: { name: 'Neha Gupta', phone: '9822334455' }, mode: 'UPI', picks: [4, 6] },
+        { hour: 10, min: 30, cust: { name: 'Kavita Rao', phone: '9845112233' }, mode: 'CASH', picks: [1, 7] },
+        { hour: 12, min: 40, cust: { name: 'Amit Kulkarni', phone: '9890123456' }, mode: 'UPI', picks: [0, 4, 8] },
+        { hour: 15, min: 20, cust: { name: 'Ramesh Patel', phone: '9820112233' }, mode: 'UPI', picks: [2, 6] },
+        { hour: 18, min: 10, cust: { name: 'Priya Sharma', phone: '9876543210' }, mode: 'CASH', picks: [1, 3] },
+        { hour: 20, min: 5, cust: { name: 'Sunita Verma', phone: '9765432190' }, mode: 'UPI', picks: [0, 5] }
+      ];
+
+      for (const cand of todayCandidates) {
+        if (cand.hour < currentHour || (cand.hour === currentHour && cand.min < currentMin)) {
+          generateOrder(now, cand.hour, cand.min, cand.cust, cand.mode, 'PAID', cand.picks);
+        }
+      }
     });
 
     seedTxn();

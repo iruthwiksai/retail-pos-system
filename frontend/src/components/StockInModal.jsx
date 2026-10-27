@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ArrowDownToLine, Trash2, CheckCircle2, Search, Building2, Package } from 'lucide-react';
+import { X, ArrowDownToLine, Trash2, CheckCircle2, Search, Building2, Package, Sparkles, TrendingUp, AlertTriangle } from 'lucide-react';
 
 export default function StockInModal({
   isOpen,
@@ -139,6 +139,30 @@ export default function StockInModal({
     ? `${activeExistingProduct.stock} ${activeExistingProduct.unit}`
     : (isNewProductMode ? '0 (New)' : '—');
 
+  // Dynamic replenishment analysis: velocity & shelf threshold cover
+  const calculateSuggestedRestock = (prod) => {
+    if (!prod) return 10;
+    const threshold = prod.low_stock_threshold || 10;
+    const currentStock = prod.stock || 0;
+    // Fast-moving item dynamic cover: target buffer 2.5x threshold minus current stock
+    const needed = Math.max(Math.ceil(threshold * 2.5) - Math.floor(currentStock), prod.unit === 'kg' ? 10 : 12);
+    return Math.max(needed, 5);
+  };
+  const suggestedRestockQty = activeExistingProduct ? calculateSuggestedRestock(activeExistingProduct) : null;
+
+  // Active pricing & margin calculation
+  const activeSellingPrice = isNewProductMode
+    ? (newProductSellingPrice !== '' ? Number(newProductSellingPrice) : Number((costNum * 1.25).toFixed(2)))
+    : (activeExistingProduct?.selling_price || 0);
+
+  const profitPerUnit = activeSellingPrice - costNum;
+  const marginPercent = activeSellingPrice > 0
+    ? ((profitPerUnit / activeSellingPrice) * 100).toFixed(1)
+    : null;
+  const markupPercent = costNum > 0
+    ? ((profitPerUnit / costNum) * 100).toFixed(1)
+    : null;
+
   // Total cost for current item: incomingStock * costPerUnit
   const qtyNum = Number(incomingStock) || 0;
   const costNum = Number(costPerUnit) || 0;
@@ -255,7 +279,7 @@ export default function StockInModal({
     setBillItems(prev => prev.filter((_, i) => i !== index));
   };
 
-  // Confirm & Add to Cart (Right Action)
+  // Confirm & Add Inventory (Right Action)
   const handleConfirmAndAddToStock = async () => {
     if (billItems.length === 0) {
       alert('Vendor bill is empty. Please add at least one product using "Add Product to Vendor Bill".');
@@ -263,6 +287,18 @@ export default function StockInModal({
     }
 
     const supplierToUse = (newSupplierName.trim() || selectedSupplier.trim() || 'Direct Vendor').trim();
+    const totalUnitsCount = billItems.reduce((acc, it) => acc + Number(it.quantity), 0);
+
+    const isConfirmed = window.confirm(
+      `Confirm & Add Inventory to Stock?\n\n` +
+      `• Supplier: ${supplierToUse}\n` +
+      (invoiceNo.trim() ? `• Invoice #: ${invoiceNo.trim()}\n` : '') +
+      `• Products: ${billItems.length} items (${totalUnitsCount} total units)\n` +
+      `• Total Inward Cost: ${currency}${billTotalAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n\n` +
+      `Click OK to confirm. This will immediately update shelf stock and log the vendor inward entry.`
+    );
+
+    if (!isConfirmed) return;
 
     setSubmittingBill(true);
 
@@ -323,7 +359,7 @@ export default function StockInModal({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/75 backdrop-blur-sm animate-fadeIn">
       {/* Modal Container: constrained so bottom buttons never go below the page */}
-      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col border border-slate-200 overflow-hidden">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-6xl w-full min-h-[600px] max-h-[95vh] flex flex-col border border-slate-200 overflow-hidden">
         
         {/* Header */}
         <div className="bg-emerald-800 text-white px-5 py-3 flex items-center justify-between shrink-0 shadow-md">
@@ -483,6 +519,31 @@ export default function StockInModal({
                 )}
               </div>
 
+              {/* Dynamic Suggested Restock Assistant */}
+              {activeExistingProduct && suggestedRestockQty && (
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 shadow-2xs animate-fadeIn">
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <Sparkles className="w-4 h-4 text-emerald-700 shrink-0" />
+                    <div className="truncate text-xs">
+                      <span className="font-extrabold text-emerald-950 mr-1.5">Suggested Restock:</span>
+                      <span className="font-black text-emerald-900 bg-white px-2 py-0.5 rounded-md border border-emerald-200">
+                        {suggestedRestockQty} {activeExistingProduct.unit}
+                      </span>
+                      <span className="text-[10px] text-emerald-700 font-semibold ml-1.5 hidden sm:inline">
+                        (Fast turnover & safety cover)
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIncomingStock(String(suggestedRestockQty))}
+                    className="px-2.5 py-1 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs rounded-lg transition active:scale-95 shrink-0 cursor-pointer"
+                  >
+                    Apply
+                  </button>
+                </div>
+              )}
+
               {/* 2. INCOMING STOCK & COST PER 1 UNIT (without +5 +10 steppers) */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
@@ -525,6 +586,38 @@ export default function StockInModal({
                   </div>
                 </div>
               </div>
+
+              {/* Expected Profit Margin Breakdown */}
+              {activeSellingPrice > 0 && costNum > 0 && (
+                <div className={`p-2.5 rounded-xl border flex items-center justify-between text-xs transition animate-fadeIn ${
+                  Number(marginPercent) >= 20 ? 'bg-emerald-50/90 border-emerald-300 text-emerald-950' :
+                  Number(marginPercent) >= 10 ? 'bg-blue-50/90 border-blue-300 text-blue-950' :
+                  Number(marginPercent) >= 0 ? 'bg-amber-50/90 border-amber-300 text-amber-950' :
+                  'bg-rose-50/90 border-rose-300 text-rose-950'
+                }`}>
+                  <div className="flex items-center space-x-2 min-w-0">
+                    <TrendingUp className="w-4 h-4 shrink-0 text-emerald-700" />
+                    <div>
+                      <div className="flex items-center space-x-1.5">
+                        <span className="font-extrabold">Profit Margin:</span>
+                        <span className="font-black text-sm">{marginPercent}%</span>
+                        {Number(marginPercent) < 0 && (
+                          <span className="px-1.5 py-0.2 rounded bg-rose-200 text-rose-800 text-[10px] font-black">
+                            Cost exceeds Selling Price!
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-medium">
+                        Selling @ {currency}{activeSellingPrice.toFixed(2)} • Profit: {currency}{profitPerUnit.toFixed(2)} / {activeExistingProduct?.unit || newProductUnit}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Markup</span>
+                    <span className="font-black text-xs text-slate-800">{markupPercent}%</span>
+                  </div>
+                </div>
+              )}
 
               {/* 3. CURRENT STOCK & TOTAL COST */}
               <div className="grid grid-cols-2 gap-2.5">
@@ -613,8 +706,8 @@ export default function StockInModal({
                 </span>
               </div>
 
-              {/* Table with Prominent + and - Feature */}
-              <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 flex-1 max-h-[160px] sm:max-h-[190px] overflow-y-auto">
+              {/* Table with Prominent + and - Feature with Expanded Height */}
+              <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-50/50 flex-1 min-h-[260px] max-h-[380px] sm:max-h-[440px] overflow-y-auto">
                 <table className="w-full table-fixed text-left text-xs">
                   <thead className="bg-slate-100 text-slate-700 font-extrabold uppercase tracking-wider border-b border-slate-200 sticky top-0">
                     <tr>
@@ -750,7 +843,7 @@ export default function StockInModal({
 
             </div>
 
-            {/* Bottom Button: ONLY "Confirm & Add to Cart" (No Products - amount) */}
+            {/* Bottom Button: ONLY "Confirm & Add Inventory" */}
             <div className="pt-1 shrink-0">
               <button
                 type="button"
@@ -760,7 +853,7 @@ export default function StockInModal({
               >
                 <CheckCircle2 className="w-5 h-5 text-yellow-300" />
                 <span>
-                  {submittingBill ? 'Updating Stock...' : 'Confirm & Add to Cart'}
+                  {submittingBill ? 'Updating Stock...' : 'Confirm & Add Inventory'}
                 </span>
               </button>
             </div>

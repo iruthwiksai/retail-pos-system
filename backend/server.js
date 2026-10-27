@@ -603,8 +603,8 @@ app.post('/api/orders', sensitiveActionLimiter, (req, res) => {
         INSERT INTO orders (
           order_number, customer_name, customer_phone, total_mrp, subtotal, 
           discount, total_amount, total_savings, payment_method, payment_status, 
-          upi_reference, cashier_notes
-        ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+          upi_reference, cashier_notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
       `);
 
       // Collision-free order sequence generation inside transaction
@@ -728,7 +728,7 @@ app.get('/api/orders', (req, res) => {
           ELSE 0 
         END as margin_percent
       FROM orders o
-      WHERE 1=1
+      WHERE datetime(o.created_at, 'localtime') <= datetime('now', 'localtime')
     `;
     const params = [];
 
@@ -866,11 +866,12 @@ app.get('/api/analytics', (req, res) => {
       // 7 AM to 10 PM hourly breakdown for today
       const rawHourly = db.prepare(`
         SELECT 
-          CAST(strftime('%H', created_at, 'localtime') AS INTEGER) as hour,
-          COUNT(id) as orders_count,
-          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
-        FROM orders
-        WHERE ${paidCondition}
+          CAST(strftime('%H', o.created_at, 'localtime') AS INTEGER) as hour,
+          COUNT(DISTINCT o.id) as orders_count,
+          ROUND(COALESCE(SUM(o.total_amount), 0), 2) as revenue,
+          ROUND(COALESCE(SUM(o.total_amount - (SELECT COALESCE(SUM(oi.quantity * oi.cost_price), 0) FROM order_items oi WHERE oi.order_id = o.id)), 0), 2) as profit
+        FROM orders o
+        WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
         GROUP BY hour
       `).all();
 
@@ -883,18 +884,20 @@ app.get('/api/analytics', (req, res) => {
           hour: h,
           label: `${h % 12 === 0 ? 12 : h % 12} ${h >= 12 ? 'PM' : 'AM'}`,
           orders_count: found ? found.orders_count : 0,
-          revenue: found ? found.revenue : 0
+          revenue: found ? found.revenue : 0,
+          profit: found ? found.profit : 0
         });
       }
     } else if (period === 'week') {
       // Fill all 7 days from T-6 to T
       const rawDaily = db.prepare(`
         SELECT 
-          strftime('%Y-%m-%d', created_at, 'localtime') as date_str,
-          COUNT(id) as orders_count,
-          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
-        FROM orders
-        WHERE ${paidCondition}
+          strftime('%Y-%m-%d', o.created_at, 'localtime') as date_str,
+          COUNT(DISTINCT o.id) as orders_count,
+          ROUND(COALESCE(SUM(o.total_amount), 0), 2) as revenue,
+          ROUND(COALESCE(SUM(o.total_amount - (SELECT COALESCE(SUM(oi.quantity * oi.cost_price), 0) FROM order_items oi WHERE oi.order_id = o.id)), 0), 2) as profit
+        FROM orders o
+        WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
         GROUP BY date_str
       `).all();
 
@@ -912,18 +915,20 @@ app.get('/api/analytics', (req, res) => {
           date: dateStr,
           label: dayLabel,
           orders_count: found ? found.orders_count : 0,
-          revenue: found ? found.revenue : 0
+          revenue: found ? found.revenue : 0,
+          profit: found ? found.profit : 0
         });
       }
     } else if (period === 'month') {
       // Fill all days from 1st of month to today
       const rawDaily = db.prepare(`
         SELECT 
-          strftime('%Y-%m-%d', created_at, 'localtime') as date_str,
-          COUNT(id) as orders_count,
-          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
-        FROM orders
-        WHERE ${paidCondition}
+          strftime('%Y-%m-%d', o.created_at, 'localtime') as date_str,
+          COUNT(DISTINCT o.id) as orders_count,
+          ROUND(COALESCE(SUM(o.total_amount), 0), 2) as revenue,
+          ROUND(COALESCE(SUM(o.total_amount - (SELECT COALESCE(SUM(oi.quantity * oi.cost_price), 0) FROM order_items oi WHERE oi.order_id = o.id)), 0), 2) as profit
+        FROM orders o
+        WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
         GROUP BY date_str
       `).all();
 
@@ -945,19 +950,21 @@ app.get('/api/analytics', (req, res) => {
           date: dateStr,
           label: dayLabel,
           orders_count: found ? found.orders_count : 0,
-          revenue: found ? found.revenue : 0
+          revenue: found ? found.revenue : 0,
+          profit: found ? found.profit : 0
         });
       }
     } else {
       // All time / custom range grouped by date
       salesTrend = db.prepare(`
         SELECT 
-          strftime('%Y-%m-%d', created_at, 'localtime') as date,
-          strftime('%d %b', created_at, 'localtime') as label,
-          COUNT(id) as orders_count,
-          ROUND(COALESCE(SUM(total_amount), 0), 2) as revenue
-        FROM orders
-        WHERE ${paidCondition}
+          strftime('%Y-%m-%d', o.created_at, 'localtime') as date,
+          strftime('%d %b', o.created_at, 'localtime') as label,
+          COUNT(DISTINCT o.id) as orders_count,
+          ROUND(COALESCE(SUM(o.total_amount), 0), 2) as revenue,
+          ROUND(COALESCE(SUM(o.total_amount - (SELECT COALESCE(SUM(oi.quantity * oi.cost_price), 0) FROM order_items oi WHERE oi.order_id = o.id)), 0), 2) as profit
+        FROM orders o
+        WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
         GROUP BY date
         ORDER BY date ASC
       `).all();
@@ -1078,47 +1085,69 @@ app.get('/api/analytics', (req, res) => {
     const peakRevenueDay = dayOfWeekDistribution.reduce((max, d) => (d.revenue > (max?.revenue || 0) ? d : max), dayOfWeekDistribution[0]);
 
     // 8. Top Selling Products (Ranked by revenue & quantity)
-    const topProducts = db.prepare(`
+    const topProductsRaw = db.prepare(`
       SELECT 
         oi.product_name,
+        oi.product_id,
         COALESCE(p.category, 'General') as category,
+        COALESCE(p.stock, 0) as current_stock,
+        COALESCE(p.unit, 'pcs') as unit,
         SUM(oi.quantity) as total_qty,
-        SUM(oi.item_total) as total_sales,
-        SUM(oi.item_total - (oi.cost_price * oi.quantity)) as total_profit
+        ROUND(SUM(oi.item_total), 2) as total_sales,
+        ROUND(SUM(oi.item_total - (oi.cost_price * oi.quantity)), 2) as total_profit,
+        COUNT(DISTINCT oi.order_id) as times_ordered
       FROM order_items oi
       JOIN orders o ON oi.order_id = o.id
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
       GROUP BY oi.product_name
       ORDER BY total_sales DESC
-      LIMIT 10
-    `).all();
+      LIMIT 15
+    `).all().map(p => ({
+      ...p,
+      margin_percent: p.total_sales > 0 ? Number(((p.total_profit / p.total_sales) * 100).toFixed(1)) : 0
+    }));
 
-    // 9. Slow-moving Products with 30-day stock velocity and days of stock left
+    // Champions: Volume Leader (highest units), Revenue Leader (highest ₹), Profit Leader (highest margin ₹)
+    const highestSellingByUnits = [...topProductsRaw].sort((a, b) => b.total_qty - a.total_qty)[0] || null;
+    const highestRevenueProduct = [...topProductsRaw].sort((a, b) => b.total_sales - a.total_sales)[0] || null;
+    const highestProfitProduct = [...topProductsRaw].sort((a, b) => b.total_profit - a.total_profit)[0] || null;
+
+    const champions = {
+      byUnits: highestSellingByUnits,
+      byRevenue: highestRevenueProduct,
+      byProfit: highestProfitProduct
+    };
+
+    const topProducts = topProductsRaw;
+
+    // 9. Slow-moving Products with 30-day stock velocity, times ordered, and days of stock left
     const slowProducts = db.prepare(`
       SELECT p.id, p.name, p.category, p.stock, p.unit, p.selling_price, p.cost_price, p.low_stock_threshold,
-             COALESCE(SUM(oi.quantity), 0) as units_sold_30d
+             COALESCE(SUM(oi.quantity), 0) as units_sold_30d,
+             COUNT(DISTINCT oi.order_id) as times_ordered_30d
       FROM products p
       LEFT JOIN order_items oi ON p.id = oi.product_id AND oi.order_id IN (
         SELECT id FROM orders 
-        WHERE payment_status = 'PAID' AND date(created_at, 'localtime') >= date('now', 'localtime', '-29 days')
+        WHERE payment_status = 'PAID' AND datetime(created_at, 'localtime') <= datetime('now', 'localtime') AND date(created_at, 'localtime') >= date('now', 'localtime', '-29 days')
       )
       WHERE COALESCE(p.is_active, 1) = 1
       GROUP BY p.id
       ORDER BY units_sold_30d ASC, p.stock DESC
-      LIMIT 6
+      LIMIT 8
     `).all().map(p => {
       const velocity = p.units_sold_30d / 30; // true 30-day daily run rate
       const daysOfStock = velocity > 0 ? Math.round(p.stock / velocity) : (p.stock > 0 ? 999 : 0);
       return {
         ...p,
         units_sold: p.units_sold_30d,
+        times_ordered: p.times_ordered_30d || 0,
         days_of_stock: daysOfStock,
         needs_reorder: p.stock <= (p.low_stock_threshold || 5)
       };
     });
 
-    // 10. Category-wise sales sorted by revenue with Margin %
+    // 10. Fast-mover Category performance & margin contribution
     const categorySalesRaw = db.prepare(`
       SELECT 
         COALESCE(p.category, 'General') as category,
@@ -1131,7 +1160,7 @@ app.get('/api/analytics', (req, res) => {
       LEFT JOIN products p ON oi.product_id = p.id
       WHERE ${paidCondition.replace(/payment_status/g, 'o.payment_status').replace(/created_at/g, 'o.created_at')}
       GROUP BY category
-      ORDER BY revenue DESC
+      ORDER BY units_sold DESC, revenue DESC
     `).all();
 
     const categorySales = categorySalesRaw.map(c => ({
@@ -1385,6 +1414,7 @@ app.get('/api/analytics', (req, res) => {
         data: heatmap
       },
       topProducts,
+      champions,
       slowProducts,
       reorderList,
       categorySales,

@@ -13,10 +13,12 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
 
   const parseDate = (d) => {
     if (!d) return new Date();
-    const str = typeof d === 'string' && !d.includes('Z') && !d.includes('+')
-      ? d.replace(' ', 'T') + 'Z'
-      : d;
-    return new Date(str);
+    if (d instanceof Date) return d;
+    if (typeof d === 'string') {
+      if (d.includes('Z') || d.includes('+')) return new Date(d);
+      return new Date(d.replace(' ', 'T'));
+    }
+    return new Date(d);
   };
 
   const fetchOrders = async () => {
@@ -29,7 +31,10 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
 
       const res = await fetch(url);
       const data = await res.json();
-      setOrders(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data : [];
+      // Guarantee strictly NO bills of future time ever appear in the UI
+      const nowMs = Date.now() + 60000;
+      setOrders(list.filter(o => parseDate(o.created_at).getTime() <= nowMs));
     } catch (err) {
       console.error('Error fetching orders:', err);
     } finally {
