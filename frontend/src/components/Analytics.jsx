@@ -60,7 +60,7 @@ export default function Analytics({ settings = {}, onGoToPos }) {
   const [error, setError] = useState(null);
 
   const currency = settings.currency_symbol || '₹';
-  const storeName = settings.store_name || 'Manidevi General Store';
+  const storeName = settings.store_name || 'Mani Devi General Store';
   const upiId = settings.upi_id || '';
 
   // Compact currency formatter (e.g. ₹1.5k, ₹25k, ₹1.2L)

@@ -6,7 +6,7 @@ export default function ReceiptModal({ isOpen, onClose, order, settings }) {
 
   const receiptRef = useRef();
 
-  const storeName = settings.store_name || 'Manidevi General Store';
+  const storeName = settings.store_name || 'Mani Devi General Store';
   const storeAddress = settings.store_address || 'Main Market Road';
   const storePhone = settings.store_phone || '+91 98765 43210';
   const gstin = settings.gstin || '';

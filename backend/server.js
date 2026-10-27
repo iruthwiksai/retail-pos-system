@@ -1518,7 +1518,7 @@ app.get('/api/backup/download', requireManagerPin, (req, res) => {
       return res.status(404).json({ error: 'Database file not found on server' });
     }
     const dateStr = getTodayISTDateStr();
-    res.setHeader('Content-Disposition', `attachment; filename="manidevi_retail_backup_${dateStr}.db"`);
+    res.setHeader('Content-Disposition', `attachment; filename="mani_devi_retail_backup_${dateStr}.db"`);
     res.setHeader('Content-Type', 'application/vnd.sqlite3');
     const fileStream = fs.createReadStream(dbPath);
     fileStream.pipe(res);

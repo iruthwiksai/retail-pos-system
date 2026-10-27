@@ -125,12 +125,12 @@ function initDatabase() {
 
   // Initialize default settings if missing
   const defaultSettings = [
-    { key: 'store_name', value: 'Manidevi General Store' },
+    { key: 'store_name', value: 'Mani Devi General Store' },
     { key: 'store_tagline', value: 'Fresh Grocery & Daily Essentials' },
     { key: 'store_address', value: 'Main Market Road, Near City Center' },
     { key: 'store_phone', value: '+91 98765 43210' },
     { key: 'upi_id', value: 'manidevi@upi' },
-    { key: 'upi_name', value: 'Manidevi General Store' },
+    { key: 'upi_name', value: 'Mani Devi General Store' },
     { key: 'gstin', value: '27AABCS1429B1ZB' },
     { key: 'currency_symbol', value: '₹' },
     { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' },
@@ -144,8 +144,8 @@ function initDatabase() {
     }
   });
   setMany(defaultSettings);
-  db.prepare("UPDATE settings SET value = 'Manidevi General Store' WHERE key = 'store_name' AND value IN ('VijayaLakshmi Minimart', 'DMart Local Supermarket')").run();
-  db.prepare("UPDATE settings SET value = 'Manidevi General Store' WHERE key = 'upi_name' AND value IN ('VijayaLakshmi Minimart', 'Smart Supermarket')").run();
+  db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'store_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'DMart Local Supermarket')").run();
+  db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'upi_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'Smart Supermarket')").run();
 
   // Seed sample products if catalog is empty
   const count = db.prepare('SELECT COUNT(*) as count FROM products').get().count;

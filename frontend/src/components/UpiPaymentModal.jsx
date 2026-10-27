@@ -22,11 +22,11 @@ export default function UpiPaymentModal({
   const [cashierNotes, setCashierNotes] = useState('');
 
   const upiId = settings.upi_id || 'manidevi@upi';
-  const upiName = settings.upi_name || settings.store_name || 'Manidevi General Store';
+  const upiName = settings.upi_name || settings.store_name || 'Mani Devi General Store';
   const currency = settings.currency_symbol || '₹';
 
   // Construct UPI payment URI (consistent store bill note)
-  const note = `${settings.store_name || 'Manidevi General Store'} Bill ${customerPhone ? `(${customerPhone})` : ''}`.trim();
+  const note = `${settings.store_name || 'Mani Devi General Store'} Bill ${customerPhone ? `(${customerPhone})` : ''}`.trim();
   const upiPayload = `upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent(upiName)}&am=${totalAmount.toFixed(2)}&cu=INR&tn=${encodeURIComponent(note)}`;
 
   const handleCopyUPI = () => {

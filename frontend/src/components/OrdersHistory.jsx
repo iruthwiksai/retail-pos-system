@@ -103,7 +103,7 @@ export default function OrdersHistory({ onSelectOrder, settings }) {
       const cleanPhone = fullOrder.customer_phone.replace(/\D/g, '');
       const fullPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
 
-      let msg = `*--- ${settings.store_name || 'Manidevi General Store'} ---*\n`;
+      let msg = `*--- ${settings.store_name || 'Mani Devi General Store'} ---*\n`;
       msg += `🧾 *Tax Invoice:* ${fullOrder.order_number}\n`;
       msg += `📅 *Date:* ${new Date(fullOrder.created_at).toLocaleString('en-IN')}\n\n`;
       msg += `*Items Purchased:*\n`;
