@@ -4,6 +4,29 @@ import StockInModal from './StockInModal';
 import AddProductModal from './AddProductModal';
 import BarcodeModal from './BarcodeModal';
 
+function ProductThumbnail({ src, alt }) {
+  const [imgError, setImgError] = useState(false);
+
+  if (!src || imgError) {
+    return (
+      <div className="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 border border-slate-200 shadow-2xs">
+        <Package className="w-6 h-6 text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-12 h-12 rounded-xl bg-white flex items-center justify-center p-1 shrink-0 border border-slate-200 shadow-2xs overflow-hidden group">
+      <img
+        src={src}
+        alt={alt}
+        className="w-full h-full object-contain group-hover:scale-110 transition duration-150"
+        onError={() => setImgError(true)}
+      />
+    </div>
+  );
+}
+
 export default function Inventory({ products, onRefreshProducts, settings }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL'); // ALL, LOW, OUT
@@ -248,19 +271,8 @@ export default function Inventory({ products, onRefreshProducts, settings }) {
                   return (
                     <tr key={p.id} className="hover:bg-slate-50 transition text-sm">
                       <td className="py-3.5 px-4">
-                        <div className="flex items-center space-x-3">
-                          {p.image_url ? (
-                            <img
-                              src={p.image_url}
-                              alt={p.name}
-                              className="w-10 h-10 rounded-lg object-contain p-0.5 bg-white flex-shrink-0 border border-slate-200 shadow-xs"
-                              onError={(e) => { e.target.style.display = 'none'; }}
-                            />
-                          ) : (
-                            <div className="w-10 h-10 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 flex-shrink-0 border border-slate-200">
-                              <Package className="w-5 h-5" />
-                            </div>
-                          )}
+                        <div className="flex items-center space-x-3.5">
+                          <ProductThumbnail src={p.image_url} alt={p.name} />
                           <div className="min-w-0">
                             <div className="font-bold text-slate-900 text-base">{p.name}</div>
                             <div className="text-xs text-slate-400 font-mono">{p.barcode || 'NO-BARCODE'}</div>

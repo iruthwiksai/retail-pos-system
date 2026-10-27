@@ -243,6 +243,43 @@ export default function Analytics({ settings = {}, onGoToPos }) {
     byProfit: topProducts.length > 0 ? [...topProducts].sort((a, b) => b.total_profit - a.total_profit)[0] : null
   };
 
+  // 3 distinct graph datasets for Volume, Revenue, and Profit Leaders
+  const topVolumeProducts = useMemo(() => {
+    return [...topProducts]
+      .sort((a, b) => b.total_qty - a.total_qty)
+      .slice(0, 5)
+      .map(p => ({
+        ...p,
+        label: p.product_name.length > 12 ? p.product_name.slice(0, 10) + '…' : p.product_name,
+        fullName: p.product_name,
+        value: p.total_qty
+      }));
+  }, [topProducts]);
+
+  const topRevenueProducts = useMemo(() => {
+    return [...topProducts]
+      .sort((a, b) => b.total_sales - a.total_sales)
+      .slice(0, 5)
+      .map(p => ({
+        ...p,
+        label: p.product_name.length > 12 ? p.product_name.slice(0, 10) + '…' : p.product_name,
+        fullName: p.product_name,
+        value: p.total_sales
+      }));
+  }, [topProducts]);
+
+  const topProfitProducts = useMemo(() => {
+    return [...topProducts]
+      .sort((a, b) => b.total_profit - a.total_profit)
+      .slice(0, 5)
+      .map(p => ({
+        ...p,
+        label: p.product_name.length > 12 ? p.product_name.slice(0, 10) + '…' : p.product_name,
+        fullName: p.product_name,
+        value: p.total_profit
+      }));
+  }, [topProducts]);
+
   // Dedicated coordinate tooltip for line, area, and combo charts (explicit X & Y)
   const CoordinateTooltip = ({ active, payload, label, isCompact = false }) => {
     if (!active || !payload || !payload.length) return null;
@@ -1077,78 +1114,146 @@ export default function Analytics({ settings = {}, onGoToPos }) {
       {!loading && activeTab === 'products' && (
         <div className="space-y-6">
 
-          {/* Top Performer Champion Highlights: Units, Revenue, and Margin Leaders */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* ========================================================================= */}
+          {/* 3 DISTINCT GRAPHS FOR VOLUME, REVENUE, AND PROFIT LEADERS */}
+          {/* ========================================================================= */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
             
-            {/* 1. Highest Selling by Units */}
-            <div className="bg-gradient-to-br from-blue-50 to-indigo-50/60 p-4 sm:p-5 rounded-2xl border-2 border-blue-200 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md border border-blue-300 flex items-center gap-1">
-                  <span>🥇</span> Volume Leader
-                </span>
-                <span className="text-xs text-blue-700 font-extrabold">Highest Selling (Units)</span>
-              </div>
+            {/* Graph 1: Volume Leaders (Units Sold) */}
+            <div className="bg-white p-5 rounded-2xl shadow-xs border-2 border-blue-200 flex flex-col justify-between space-y-3">
               <div>
-                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byUnits?.product_name || '—'}>
-                  {champions.byUnits?.product_name || 'No sales recorded'}
-                </h4>
-                <div className="text-2xl sm:text-3xl font-black text-blue-950 mt-1">
-                  {champions.byUnits ? `${champions.byUnits.total_qty} ${champions.byUnits.unit || 'units'}` : '0 units'}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 bg-blue-100 px-2.5 py-0.5 rounded-md border border-blue-300 flex items-center gap-1">
+                    <span>🥇</span> Volume Leader Graph
+                  </span>
+                  <span className="text-xs text-blue-700 font-extrabold">Top 5 by Units</span>
+                </div>
+                <div className="mt-2.5">
+                  <h4 className="font-black text-sm text-slate-900 truncate" title={champions.byUnits?.product_name || '—'}>
+                    {champions.byUnits?.product_name || 'No sales recorded'}
+                  </h4>
+                  <div className="text-xl font-black text-blue-950 mt-0.5">
+                    {champions.byUnits ? `${champions.byUnits.total_qty} ${champions.byUnits.unit || 'units'} sold` : '0 units'}
+                  </div>
                 </div>
               </div>
-              <div className="pt-2 border-t border-blue-200/80 flex items-center justify-between text-xs text-blue-900 font-semibold">
-                <span>{champions.byUnits?.times_ordered || 0} customer bills</span>
-                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-blue-200 text-blue-800">
-                  {champions.byUnits?.category || '—'}
-                </span>
+
+              {/* Chart Body */}
+              <div className="h-48 w-full min-h-[190px]">
+                {topVolumeProducts.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topVolumeProducts} margin={{ top: 10, right: 10, left: -20, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748B', fontWeight: 600 }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748B' }} />
+                      <Tooltip content={<CoordinateTooltip />} />
+                      <Bar dataKey="value" name="Units Sold" radius={[4, 4, 0, 0]}>
+                        {topVolumeProducts.map((entry, index) => (
+                          <Cell key={`cell-vol-${index}`} fill={index === 0 ? '#1D4ED8' : '#60A5FA'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 text-xs">No volume data yet.</div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-blue-800 font-semibold">
+                <span>Leader in {champions.byUnits?.times_ordered || 0} customer bills</span>
+                <span className="font-bold text-blue-900">{champions.byUnits?.category || '—'}</span>
               </div>
             </div>
 
-            {/* 2. Product Yielding Highest Revenue */}
-            <div className="bg-gradient-to-br from-emerald-50 to-teal-50/60 p-4 sm:p-5 rounded-2xl border-2 border-emerald-300 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1">
-                  <span>💰</span> Revenue Leader
-                </span>
-                <span className="text-xs text-emerald-700 font-extrabold">Top Gross Revenue</span>
-              </div>
+            {/* Graph 2: Revenue Leaders (Gross Sales ₹) */}
+            <div className="bg-white p-5 rounded-2xl shadow-xs border-2 border-emerald-300 flex flex-col justify-between space-y-3">
               <div>
-                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byRevenue?.product_name || '—'}>
-                  {champions.byRevenue?.product_name || 'No sales recorded'}
-                </h4>
-                <div className="text-2xl sm:text-3xl font-black text-emerald-950 mt-1">
-                  {currency}{champions.byRevenue ? Number(champions.byRevenue.total_sales).toLocaleString('en-IN') : 0}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-md border border-emerald-300 flex items-center gap-1">
+                    <span>💰</span> Revenue Leader Graph
+                  </span>
+                  <span className="text-xs text-emerald-700 font-extrabold">Top 5 by Revenue</span>
+                </div>
+                <div className="mt-2.5">
+                  <h4 className="font-black text-sm text-slate-900 truncate" title={champions.byRevenue?.product_name || '—'}>
+                    {champions.byRevenue?.product_name || 'No sales recorded'}
+                  </h4>
+                  <div className="text-xl font-black text-emerald-950 mt-0.5">
+                    {currency}{champions.byRevenue ? Number(champions.byRevenue.total_sales).toLocaleString('en-IN') : 0}
+                  </div>
                 </div>
               </div>
-              <div className="pt-2 border-t border-emerald-200/80 flex items-center justify-between text-xs text-emerald-900 font-semibold">
-                <span>Profit: +{currency}{champions.byRevenue ? Number(champions.byRevenue.total_profit).toFixed(0) : 0}</span>
-                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-emerald-200 text-emerald-800">
-                  {champions.byRevenue?.category || '—'}
-                </span>
+
+              {/* Chart Body */}
+              <div className="h-48 w-full min-h-[190px]">
+                {topRevenueProducts.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topRevenueProducts} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748B', fontWeight: 600 }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748B' }} tickFormatter={formatCompact} />
+                      <Tooltip content={<CoordinateTooltip />} />
+                      <Bar dataKey="value" name="Gross Sales" radius={[4, 4, 0, 0]}>
+                        {topRevenueProducts.map((entry, index) => (
+                          <Cell key={`cell-rev-${index}`} fill={index === 0 ? '#047857' : '#10B981'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 text-xs">No revenue data yet.</div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-emerald-800 font-semibold">
+                <span>Profit Yield: +{currency}{champions.byRevenue ? Number(champions.byRevenue.total_profit).toFixed(0) : 0}</span>
+                <span className="font-bold text-emerald-900">{champions.byRevenue?.category || '—'}</span>
               </div>
             </div>
 
-            {/* 3. Product Yielding Highest Profit Margin */}
-            <div className="bg-gradient-to-br from-amber-50 to-yellow-50/60 p-4 sm:p-5 rounded-2xl border-2 border-amber-300 shadow-2xs space-y-2.5">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 flex items-center gap-1">
-                  <span>📈</span> Profit Leader
-                </span>
-                <span className="text-xs text-amber-700 font-extrabold">Top Profit Yielding</span>
-              </div>
+            {/* Graph 3: Profit Leaders (Gross Profit ₹ & Margin %) */}
+            <div className="bg-white p-5 rounded-2xl shadow-xs border-2 border-amber-300 flex flex-col justify-between space-y-3">
               <div>
-                <h4 className="font-black text-sm sm:text-base text-slate-900 truncate" title={champions.byProfit?.product_name || '—'}>
-                  {champions.byProfit?.product_name || 'No sales recorded'}
-                </h4>
-                <div className="text-2xl sm:text-3xl font-black text-amber-950 mt-1">
-                  +{currency}{champions.byProfit ? Number(champions.byProfit.total_profit).toLocaleString('en-IN') : 0}
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100 px-2.5 py-0.5 rounded-md border border-amber-300 flex items-center gap-1">
+                    <span>📈</span> Profit Leader Graph
+                  </span>
+                  <span className="text-xs text-amber-700 font-extrabold">Top 5 by Profit</span>
+                </div>
+                <div className="mt-2.5">
+                  <h4 className="font-black text-sm text-slate-900 truncate" title={champions.byProfit?.product_name || '—'}>
+                    {champions.byProfit?.product_name || 'No sales recorded'}
+                  </h4>
+                  <div className="text-xl font-black text-amber-950 mt-0.5">
+                    +{currency}{champions.byProfit ? Number(champions.byProfit.total_profit).toLocaleString('en-IN') : 0}
+                  </div>
                 </div>
               </div>
-              <div className="pt-2 border-t border-amber-200/80 flex items-center justify-between text-xs text-amber-900 font-semibold">
-                <span>Gross Margin: <strong className="text-amber-950 font-black">{champions.byProfit?.margin_percent || 0}%</strong></span>
-                <span className="font-bold bg-white/70 px-2 py-0.5 rounded border border-amber-200 text-amber-800">
-                  {champions.byProfit?.category || '—'}
-                </span>
+
+              {/* Chart Body */}
+              <div className="h-48 w-full min-h-[190px]">
+                {topProfitProducts.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={topProfitProducts} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#F1F5F9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748B', fontWeight: 600 }} />
+                      <YAxis tick={{ fontSize: 10, fill: '#64748B' }} tickFormatter={formatCompact} />
+                      <Tooltip content={<CoordinateTooltip />} />
+                      <Bar dataKey="value" name="Gross Profit" radius={[4, 4, 0, 0]}>
+                        {topProfitProducts.map((entry, index) => (
+                          <Cell key={`cell-prof-${index}`} fill={index === 0 ? '#B45309' : '#F59E0B'} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="h-full flex items-center justify-center text-slate-400 text-xs">No profit data yet.</div>
+                )}
+              </div>
+
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-amber-800 font-semibold">
+                <span>Top Margin: <strong className="text-amber-950 font-black">{champions.byProfit?.margin_percent || 0}%</strong></span>
+                <span className="font-bold text-amber-900">{champions.byProfit?.category || '—'}</span>
               </div>
             </div>
 

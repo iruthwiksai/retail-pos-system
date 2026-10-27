@@ -12,6 +12,7 @@ export default function AddProductModal({ isOpen, onClose, productToEdit, onSucc
   const [sellingPrice, setSellingPrice] = useState('');
   const [stock, setStock] = useState('10');
   const [lowStockThreshold, setLowStockThreshold] = useState('5');
+  const [imageUrl, setImageUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const currency = settings?.currency_symbol || '₹';
@@ -26,6 +27,7 @@ export default function AddProductModal({ isOpen, onClose, productToEdit, onSucc
       setSellingPrice(String(productToEdit.selling_price || ''));
       setStock(String(productToEdit.stock || '0'));
       setLowStockThreshold(String(productToEdit.low_stock_threshold || '5'));
+      setImageUrl(productToEdit.image_url || '');
     } else {
       setBarcode('');
       setName('');
@@ -35,6 +37,7 @@ export default function AddProductModal({ isOpen, onClose, productToEdit, onSucc
       setSellingPrice('');
       setStock('20');
       setLowStockThreshold('5');
+      setImageUrl('');
     }
   }, [productToEdit]);
 
@@ -56,7 +59,8 @@ export default function AddProductModal({ isOpen, onClose, productToEdit, onSucc
         selling_price: Number(sellingPrice),
         mrp: Number(sellingPrice),
         stock: Math.max(0, Number(stock) || 0),
-        low_stock_threshold: Number(lowStockThreshold) || 5
+        low_stock_threshold: Number(lowStockThreshold) || 5,
+        image_url: imageUrl.trim() || undefined
       };
 
       const url = productToEdit ? `/api/products/${productToEdit.id}` : '/api/products';
@@ -248,6 +252,30 @@ export default function AddProductModal({ isOpen, onClose, productToEdit, onSucc
                 onChange={(e) => setLowStockThreshold(e.target.value)}
                 className="w-full px-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
+            </div>
+          </div>
+
+          {/* Product Image URL with Live Thumbnail Preview */}
+          <div>
+            <label className="block font-bold text-slate-700 mb-1">
+              Product Image URL (Optional)
+            </label>
+            <div className="flex items-center space-x-2.5">
+              <input
+                type="text"
+                placeholder="e.g. /images/atta.jpg or https://..."
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-300 rounded-xl font-medium text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              {imageUrl && (
+                <img
+                  src={imageUrl}
+                  alt="Preview"
+                  className="w-9 h-9 rounded-lg object-contain bg-white border border-slate-200 p-0.5 shrink-0"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              )}
             </div>
           </div>
 

@@ -139,6 +139,11 @@ export default function StockInModal({
     ? `${activeExistingProduct.stock} ${activeExistingProduct.unit}`
     : (isNewProductMode ? '0 (New)' : '—');
 
+  // Total cost for current item: incomingStock * costPerUnit (Declared first to avoid ReferenceError TDZ)
+  const qtyNum = Number(incomingStock) || 0;
+  const costNum = Number(costPerUnit) || 0;
+  const currentTotalCost = qtyNum * costNum;
+
   // Dynamic replenishment analysis: velocity & shelf threshold cover
   const calculateSuggestedRestock = (prod) => {
     if (!prod) return 10;
@@ -162,11 +167,6 @@ export default function StockInModal({
   const markupPercent = costNum > 0
     ? ((profitPerUnit / costNum) * 100).toFixed(1)
     : null;
-
-  // Total cost for current item: incomingStock * costPerUnit
-  const qtyNum = Number(incomingStock) || 0;
-  const costNum = Number(costPerUnit) || 0;
-  const currentTotalCost = qtyNum * costNum;
 
   // Running Final Vendor Amount
   const billTotalAmount = billItems.reduce((acc, item) => acc + (Number(item.quantity) * Number(item.cost_price)), 0);
@@ -239,6 +239,7 @@ export default function StockInModal({
         quantity: qtyNum,
         cost_price: costNum,
         totalCost: currentTotalCost,
+        imageUrl: activeExistingProduct?.image_url || null,
         notes: notes.trim()
       };
 
@@ -487,7 +488,7 @@ export default function StockInModal({
                       </button>
                     )}
 
-                    {/* ENLARGED Dropdown List */}
+                    {/* ENLARGED Dropdown List with Product Images */}
                     {isSearchDropdownOpen && (
                       <div className="absolute left-0 right-0 mt-1.5 max-h-56 overflow-y-auto bg-white border-2 border-emerald-500 rounded-2xl shadow-2xl z-40 divide-y divide-slate-100 animate-fadeIn">
                         {filteredProducts.length > 0 ? (
@@ -495,13 +496,27 @@ export default function StockInModal({
                             <div
                               key={p.id}
                               onClick={() => handleSelectProduct(p)}
-                              className={`p-3.5 flex items-center justify-between cursor-pointer transition ${
+                              className={`p-2.5 sm:p-3 flex items-center justify-between cursor-pointer transition ${
                                 selectedProductId === String(p.id) ? 'bg-emerald-50 font-bold border-l-4 border-emerald-600' : 'hover:bg-slate-50'
                               }`}
                             >
-                              <div className="min-w-0 pr-3">
-                                <span className="font-extrabold text-base text-slate-900 block truncate">{p.name}</span>
-                                <span className="text-xs text-slate-500 font-medium">{p.category} • Cost: {currency}{p.cost_price} / {p.unit}</span>
+                              <div className="flex items-center space-x-3 min-w-0 pr-3">
+                                {p.image_url ? (
+                                  <img
+                                    src={p.image_url}
+                                    alt={p.name}
+                                    className="w-9 h-9 rounded-lg object-contain p-0.5 bg-white border border-slate-200 shrink-0 shadow-2xs"
+                                    onError={(e) => { e.target.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 border border-slate-200">
+                                    <Package className="w-4 h-4" />
+                                  </div>
+                                )}
+                                <div className="min-w-0">
+                                  <span className="font-extrabold text-sm sm:text-base text-slate-900 block truncate">{p.name}</span>
+                                  <span className="text-xs text-slate-500 font-medium">{p.category} • Cost: {currency}{p.cost_price} / {p.unit}</span>
+                                </div>
                               </div>
                               <span className="shrink-0 font-black text-xs px-2 py-1 rounded-md bg-slate-100 text-slate-800 border border-slate-200">
                                 Stock: {p.stock} {p.unit}
@@ -728,8 +743,22 @@ export default function StockInModal({
                     ) : (
                       billItems.map((item, idx) => (
                         <tr key={idx} className="hover:bg-emerald-50/40 transition">
-                          <td className="py-2 px-2.5 font-bold text-slate-800 truncate" title={item.name}>
-                            {item.name}
+                          <td className="py-2 px-2.5 font-bold text-slate-800" title={item.name}>
+                            <div className="flex items-center space-x-2 min-w-0">
+                              {item.imageUrl ? (
+                                <img
+                                  src={item.imageUrl}
+                                  alt={item.name}
+                                  className="w-7 h-7 rounded-md object-contain bg-white border border-slate-200 shrink-0"
+                                  onError={(e) => { e.target.style.display = 'none'; }}
+                                />
+                              ) : (
+                                <div className="w-7 h-7 rounded-md bg-slate-100 flex items-center justify-center text-slate-400 shrink-0 border border-slate-200">
+                                  <Package className="w-3.5 h-3.5" />
+                                </div>
+                              )}
+                              <span className="truncate">{item.name}</span>
+                            </div>
                           </td>
 
                           {/* PROMINENT + and - Stepper Feature */}
