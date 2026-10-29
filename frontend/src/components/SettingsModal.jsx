@@ -14,7 +14,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
     gstin: '',
     receipt_footer_msg: '',
     currency_symbol: '₹',
-    manager_pin: '1234'
+    manager_pin: '1234',
+    cashier_pin: '0000'
   });
   const [saved, setSaved] = useState(false);
 
@@ -30,7 +31,8 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
         gstin: settings.gstin || '27AABCS1429B1ZB',
         receipt_footer_msg: settings.receipt_footer_msg || 'Thank You For Shopping With Us! Visit Again.',
         currency_symbol: settings.currency_symbol || '₹',
-        manager_pin: settings.manager_pin || '1234'
+        manager_pin: settings.manager_pin || '1234',
+        cashier_pin: settings.cashier_pin || '0000'
       });
     }
   }, [settings]);
@@ -187,29 +189,57 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
               />
             </div>
 
-            {/* Manager Security PIN */}
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl space-y-2">
+            {/* Terminal Security & Access PINs */}
+            <div className="p-3.5 bg-amber-50/80 border border-amber-200 rounded-xl space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
                   <ShieldCheck className="w-4 h-4 text-amber-700" />
-                  <span>4-Digit Manager Security PIN</span>
+                  <span>Terminal Access & Security PINs</span>
                 </span>
                 <span className="text-[10px] bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full font-bold">
-                  Protects Settings & Voids
+                  4-Digit Numeric PINs
                 </span>
               </div>
-              <input
-                type="password"
-                maxLength={4}
-                name="manager_pin"
-                value={formData.manager_pin}
-                onChange={handleChange}
-                placeholder="1234"
-                className="w-full px-3 py-2 bg-white border border-amber-300 rounded-xl font-mono text-center tracking-widest text-lg font-black focus:outline-none focus:ring-2 focus:ring-amber-500"
-              />
-              <p className="text-[11px] text-amber-800">
-                Required for modifying settings, deleting products, or voiding saved bills. Default: <strong>1234</strong>
-              </p>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-white p-2.5 rounded-xl border border-amber-300/80">
+                  <label className="block font-bold text-amber-950 text-[11px] mb-1">
+                    👑 Owner / Manager PIN *
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={4}
+                    name="manager_pin"
+                    value={formData.manager_pin}
+                    onChange={handleChange}
+                    placeholder="1234"
+                    className="w-full px-2.5 py-1.5 bg-amber-50/50 border border-amber-200 rounded-lg font-mono text-center tracking-widest text-base font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+                    required
+                  />
+                  <p className="text-[10px] text-amber-800 mt-1">
+                    Full control (Inventory, Stock-In, Analytics). Default: <strong>1234</strong>
+                  </p>
+                </div>
+
+                <div className="bg-white p-2.5 rounded-xl border border-sky-200">
+                  <label className="block font-bold text-sky-950 text-[11px] mb-1">
+                    👤 Cashier / Staff PIN *
+                  </label>
+                  <input
+                    type="password"
+                    maxLength={4}
+                    name="cashier_pin"
+                    value={formData.cashier_pin}
+                    onChange={handleChange}
+                    placeholder="0000"
+                    className="w-full px-2.5 py-1.5 bg-sky-50/50 border border-sky-200 rounded-lg font-mono text-center tracking-widest text-base font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                    required
+                  />
+                  <p className="text-[10px] text-sky-800 mt-1">
+                    Counter billing & receipt history. Default: <strong>0000</strong>
+                  </p>
+                </div>
+              </div>
             </div>
 
             {/* 1-Click Database Backup */}
@@ -219,7 +249,7 @@ export default function SettingsModal({ isOpen, onClose, settings, onSaveSetting
                 <p className="text-[10px] text-slate-400">Download snapshot of all products, stock & bills</p>
               </div>
               <a
-                href={`/api/backup/download?manager_pin=${formData.manager_pin || '1234'}`}
+                href={`/api/backup/download?manager_pin=${formData.manager_pin || '1234'}&token=${localStorage.getItem('pos_auth_token') || ''}`}
                 download
                 className="px-3 py-2 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 flex items-center space-x-1.5 shadow-2xs transition"
               >

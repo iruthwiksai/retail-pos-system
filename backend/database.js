@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const crypto = require('crypto');
 
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'retail_pos.db');
 const db = new Database(dbPath);
@@ -134,7 +135,8 @@ function initDatabase() {
     { key: 'gstin', value: '27AABCS1429B1ZB' },
     { key: 'currency_symbol', value: '₹' },
     { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' },
-    { key: 'manager_pin', value: '1234' }
+    { key: 'manager_pin', value: '1234' },
+    { key: 'cashier_pin', value: '0000' }
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -144,6 +146,12 @@ function initDatabase() {
     }
   });
   setMany(defaultSettings);
+
+  // Initialize random auth secret if not present
+  const authSecretRow = db.prepare("SELECT value FROM settings WHERE key = 'auth_secret'").get();
+  if (!authSecretRow) {
+    db.prepare("INSERT OR IGNORE INTO settings (key, value) VALUES ('auth_secret', ?)").run(crypto.randomBytes(32).toString('hex'));
+  }
   db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'store_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'DMart Local Supermarket')").run();
   db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'upi_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'Smart Supermarket')").run();
 

@@ -7,6 +7,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const db = require('./database');
 
 const app = express();
@@ -62,8 +63,93 @@ const sensitiveActionLimiter = rateLimit({
   message: { error: 'Action rate limit reached. Please wait 1 minute.' }
 });
 
-// 5. Manager PIN Protection Middleware
-function requireManagerPin(req, res, next) {
+// 5. Authentication Token Helpers (HMAC-SHA256 JWT)
+function getAuthSecret() {
+  if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
+  let row = db.prepare("SELECT value FROM settings WHERE key = 'auth_secret'").get();
+  if (!row || !row.value) {
+    const newSecret = crypto.randomBytes(32).toString('hex');
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('auth_secret', ?)").run(newSecret);
+    return newSecret;
+  }
+  return row.value;
+}
+
+function signToken(payload) {
+  const secret = getAuthSecret();
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const b64Header = Buffer.from(JSON.stringify(header)).toString('base64url');
+  const b64Payload = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const signature = crypto.createHmac('sha256', secret)
+    .update(`${b64Header}.${b64Payload}`)
+    .digest('base64url');
+  return `${b64Header}.${b64Payload}.${signature}`;
+}
+
+function verifyToken(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  const [b64Header, b64Payload, signature] = parts;
+  const secret = getAuthSecret();
+  const expectedSignature = crypto.createHmac('sha256', secret)
+    .update(`${b64Header}.${b64Payload}`)
+    .digest('base64url');
+  if (signature !== expectedSignature) return null;
+  try {
+    const payload = JSON.parse(Buffer.from(b64Payload, 'base64url').toString('utf8'));
+    if (payload.exp && Date.now() > payload.exp) return null;
+    return payload;
+  } catch (e) {
+    return null;
+  }
+}
+
+// Global user extraction from Authorization Bearer token or x-manager-pin header
+function authenticate(req, res, next) {
+  const authHeader = req.headers.authorization;
+  const token = authHeader && authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7).trim()
+    : (req.headers['x-auth-token'] || req.query.token);
+
+  if (token) {
+    const user = verifyToken(token);
+    if (user) {
+      req.user = user;
+      return next();
+    }
+  }
+
+  // Backwards-compatibility with direct x-manager-pin header
+  const pinHeader = req.headers['x-manager-pin'];
+  if (pinHeader) {
+    const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
+    const configuredPin = configuredPinRow?.value || '1234';
+    if (pinHeader.toString().trim() === configuredPin) {
+      req.user = { role: 'manager', name: 'Owner / Manager' };
+      return next();
+    }
+  }
+
+  req.user = null;
+  next();
+}
+app.use('/api', authenticate);
+
+// Middleware to ensure user is logged in (Cashier or Manager)
+function requireAuth(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ error: 'Authentication required. Please enter your PIN to login.' });
+  }
+  next();
+}
+
+// Middleware to ensure Manager / Owner role (or valid Manager PIN)
+function requireManagerRole(req, res, next) {
+  if (req.user && req.user.role === 'manager') {
+    return next();
+  }
+
   const pinFromHeader = req.headers['x-manager-pin'];
   const pinFromBody = req.body?.manager_pin;
   const pinFromQuery = req.query?.manager_pin;
@@ -72,13 +158,16 @@ function requireManagerPin(req, res, next) {
   const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
   const configuredPin = configuredPinRow?.value || '1234';
 
-  if (!providedPin || providedPin !== configuredPin) {
-    return res.status(401).json({
-      error: 'Manager PIN required or invalid. Please provide the 4-digit Manager PIN (default: 1234).'
-    });
+  if (providedPin && providedPin === configuredPin) {
+    req.user = { role: 'manager', name: 'Owner / Manager' };
+    return next();
   }
-  next();
+
+  return res.status(403).json({
+    error: 'Manager / Owner permissions required for this action. Please enter Manager PIN.'
+  });
 }
+const requireManagerPin = requireManagerRole;
 
 // Helper to get today's date string in IST format (YYYYMMDD)
 function getTodayISTDateStr() {
@@ -166,12 +255,128 @@ app.get('/api/dashboard/widgets', (req, res) => {
   }
 });
 
+// ----------------- AUTHENTICATION API -----------------
+app.post('/api/auth/login', sensitiveActionLimiter, (req, res) => {
+  try {
+    const { pin, role } = req.body || {};
+    if (!pin) {
+      return res.status(400).json({ error: 'Please enter a 4-digit PIN' });
+    }
+
+    const pinStr = String(pin).trim();
+    const managerPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
+    const cashierPinRow = db.prepare("SELECT value FROM settings WHERE key = 'cashier_pin'").get();
+    const storeNameRow = db.prepare("SELECT value FROM settings WHERE key = 'store_name'").get();
+
+    const managerPin = managerPinRow?.value || '1234';
+    const cashierPin = cashierPinRow?.value || '0000';
+    const storeName = storeNameRow?.value || 'Mani Devi General Store';
+
+    let determinedRole = null;
+    let userName = '';
+
+    // If a specific role was selected on screen, verify against that role's PIN
+    if (role === 'manager') {
+      if (pinStr === managerPin) {
+        determinedRole = 'manager';
+        userName = 'Owner / Manager';
+      } else {
+        return res.status(401).json({ error: 'Incorrect PIN for Owner / Manager' });
+      }
+    } else if (role === 'cashier') {
+      if (pinStr === cashierPin) {
+        determinedRole = 'cashier';
+        userName = 'Cashier / Staff';
+      } else {
+        return res.status(401).json({ error: 'Incorrect PIN for Cashier' });
+      }
+    } else {
+      // Auto-detect role by matching entered PIN
+      if (pinStr === managerPin) {
+        determinedRole = 'manager';
+        userName = 'Owner / Manager';
+      } else if (pinStr === cashierPin) {
+        determinedRole = 'cashier';
+        userName = 'Cashier / Staff';
+      } else {
+        return res.status(401).json({ error: 'Invalid PIN. Please try again.' });
+      }
+    }
+
+    // 7-day token expiration for tablet POS counter continuity
+    const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const token = signToken({
+      role: determinedRole,
+      name: userName,
+      store: storeName,
+      exp
+    });
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        role: determinedRole,
+        name: userName,
+        store_name: storeName
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Check active session & permissions
+app.get('/api/auth/me', (req, res) => {
+  if (req.user) {
+    return res.json({ authenticated: true, user: req.user });
+  }
+  return res.status(401).json({ authenticated: false, error: 'Not authenticated' });
+});
+
+// Fast Manager Elevation Check (allows Cashier to unlock Manager tabs/actions on-the-spot)
+app.post('/api/auth/verify-manager-pin', sensitiveActionLimiter, (req, res) => {
+  try {
+    const { pin } = req.body || {};
+    const pinStr = (pin || '').toString().trim();
+    const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
+    const configuredPin = configuredPinRow?.value || '1234';
+
+    if (pinStr && pinStr === configuredPin) {
+      const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      const storeNameRow = db.prepare("SELECT value FROM settings WHERE key = 'store_name'").get();
+      const token = signToken({
+        role: 'manager',
+        name: 'Owner / Manager',
+        store: storeNameRow?.value || 'Mani Devi General Store',
+        exp
+      });
+      return res.json({ valid: true, token, role: 'manager', name: 'Owner / Manager' });
+    }
+    return res.status(401).json({ valid: false, error: 'Incorrect Manager PIN' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+  res.json({ success: true, message: 'Logged out successfully' });
+});
+
 // ----------------- SETTINGS API -----------------
 app.get('/api/settings', (req, res) => {
   try {
     const rows = db.prepare('SELECT key, value FROM settings').all();
     const settings = {};
-    rows.forEach(r => { settings[r.key] = r.value; });
+    const isManager = req.user && req.user.role === 'manager';
+    rows.forEach(r => {
+      // Hide sensitive PINs and auth secret unless authenticated as manager
+      if (!isManager && ['manager_pin', 'cashier_pin', 'auth_secret'].includes(r.key)) {
+        return;
+      }
+      settings[r.key] = r.value;
+    });
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -188,10 +393,11 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'gstin',
   'currency_symbol',
   'receipt_footer_msg',
-  'manager_pin'
+  'manager_pin',
+  'cashier_pin'
 ]);
 
-app.post('/api/settings', sensitiveActionLimiter, requireManagerPin, (req, res) => {
+app.post('/api/settings', sensitiveActionLimiter, requireManagerRole, (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Invalid settings body' });
@@ -211,6 +417,14 @@ app.post('/api/settings', sensitiveActionLimiter, requireManagerPin, (req, res) 
       const pinStr = String(req.body.manager_pin).trim();
       if (!/^\d{4}$/.test(pinStr)) {
         return res.status(400).json({ error: 'Manager PIN must be a 4-digit number (e.g. 1234)' });
+      }
+    }
+
+    // Validate Cashier PIN if updated
+    if (req.body.cashier_pin) {
+      const pinStr = String(req.body.cashier_pin).trim();
+      if (!/^\d{4}$/.test(pinStr)) {
+        return res.status(400).json({ error: 'Cashier PIN must be a 4-digit number (e.g. 0000)' });
       }
     }
 
@@ -271,7 +485,7 @@ app.get('/api/products/categories', (req, res) => {
   }
 });
 
-app.post('/api/products', (req, res) => {
+app.post('/api/products', sensitiveActionLimiter, requireManagerRole, (req, res) => {
   try {
     const { barcode, name, category, unit, cost_price, selling_price, mrp, stock, low_stock_threshold, image_url } = req.body;
     if (!name || cost_price === undefined || selling_price === undefined || mrp === undefined) {
@@ -312,7 +526,7 @@ app.post('/api/products', (req, res) => {
   }
 });
 
-app.put('/api/products/:id', (req, res) => {
+app.put('/api/products/:id', sensitiveActionLimiter, requireManagerRole, (req, res) => {
   try {
     const { id } = req.params;
     const { barcode, name, category, unit, cost_price, selling_price, mrp, stock, low_stock_threshold, image_url } = req.body;
@@ -366,7 +580,7 @@ app.delete('/api/products/:id', sensitiveActionLimiter, requireManagerPin, (req,
 });
 
 // ----------------- INVENTORY / STOCK-IN API -----------------
-app.post('/api/inventory/stock-in', (req, res) => {
+app.post('/api/inventory/stock-in', sensitiveActionLimiter, requireManagerRole, (req, res) => {
   try {
     const { supplier_name, invoice_no, notes } = req.body;
     let items = req.body.items;
@@ -789,7 +1003,7 @@ app.get('/api/orders/:id', (req, res) => {
 });
 
 // ----------------- BUSINESS ANALYTICS API -----------------
-app.get('/api/analytics', (req, res) => {
+app.get('/api/analytics', requireManagerRole, (req, res) => {
   try {
     const { period, startDate, endDate } = req.query; // 'today', 'week', 'month', 'all', 'custom'
 
