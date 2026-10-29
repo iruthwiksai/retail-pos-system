@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Search,
   ShoppingCart,
@@ -313,21 +313,31 @@ export default function PosBilling({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [cart, onCheckoutClick]);
 
-  // Multilingual Search: matches English name, Barcode, Telugu translation, or Hindi translation!
-  const filteredProducts = products.filter((p) => {
-    const term = searchTerm.toLowerCase().trim();
-    if (!term) return true;
-    const nameMatch = p.name.toLowerCase().includes(term);
-    const barcodeMatch = p.barcode && p.barcode.toLowerCase().includes(term);
-    const teluguMatch = getTranslatedProductName(p.name, 'te').toLowerCase().includes(term);
-    const hindiMatch = getTranslatedProductName(p.name, 'hi_en').toLowerCase().includes(term);
-    return nameMatch || barcodeMatch || teluguMatch || hindiMatch;
-  });
+  // Sort products by most frequent orders (times_ordered DESC, total_qty_sold DESC, name ASC)
+  const sortedProducts = useMemo(() => {
+    return [...products].sort((a, b) => {
+      const aCount = Number(a.times_ordered || 0);
+      const bCount = Number(b.times_ordered || 0);
+      if (bCount !== aCount) return bCount - aCount;
+      const aQty = Number(a.total_qty_sold || 0);
+      const bQty = Number(b.total_qty_sold || 0);
+      if (bQty !== aQty) return bQty - aQty;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+  }, [products]);
 
-  // Most Frequently Ordered Items list for quick add bar
-  const frequentItemsList = (widgetsData.frequentItems && widgetsData.frequentItems.length > 0)
-    ? widgetsData.frequentItems
-    : products.slice(0, 8);
+  // Multilingual Search: matches English name, Barcode, Telugu translation, or Hindi translation!
+  const filteredProducts = useMemo(() => {
+    return sortedProducts.filter((p) => {
+      const term = searchTerm.toLowerCase().trim();
+      if (!term) return true;
+      const nameMatch = p.name.toLowerCase().includes(term);
+      const barcodeMatch = p.barcode && p.barcode.toLowerCase().includes(term);
+      const teluguMatch = getTranslatedProductName(p.name, 'te').toLowerCase().includes(term);
+      const hindiMatch = getTranslatedProductName(p.name, 'hi_en').toLowerCase().includes(term);
+      return nameMatch || barcodeMatch || teluguMatch || hindiMatch;
+    });
+  }, [sortedProducts, searchTerm]);
 
   // Cart Totals with accurate MRP savings calculation
   const grandTotal = cart.reduce((acc, item) => acc + item.selling_price * item.quantity, 0);
@@ -490,76 +500,6 @@ export default function PosBilling({
             </div>
           </div>
 
-          {/* MOST FREQUENTLY ORDERED ITEMS (DIV UNDER SEARCH BAR) */}
-          <div className="bg-white p-3 rounded-2xl shadow-xs border border-slate-200 space-y-2">
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center space-x-1.5">
-                <Zap className="w-4 h-4 text-amber-500 fill-amber-500" />
-                <span className="font-black text-xs text-slate-800 uppercase tracking-wider">
-                  Most Frequently Ordered Items
-                </span>
-              </div>
-              <span className="text-[11px] font-bold text-slate-400">1-Tap Add to Cart</span>
-            </div>
-
-            <div className="flex items-center space-x-2.5 overflow-x-auto pb-1.5 pt-0.5 scrollbar-thin">
-              {frequentItemsList.slice(0, 8).map((f) => {
-                const prod = products.find((p) => p.id === f.id) || f;
-                const avail = getAvailableStock(prod);
-                const isOut = avail <= 0;
-                const isLow = avail > 0 && avail <= (prod.low_stock_threshold || 5);
-                const displayName = getTranslatedProductName(prod.name, language);
-
-                return (
-                  <button
-                    key={f.id}
-                    type="button"
-                    onClick={() => addToCart(prod)}
-                    disabled={isOut}
-                    title={prod.name}
-                    className={`group flex items-center space-x-2.5 px-3 py-2 rounded-xl border text-left transition shrink-0 min-w-[190px] max-w-[240px] shadow-2xs ${
-                      isOut
-                        ? 'bg-slate-50 border-slate-200 opacity-60 cursor-not-allowed'
-                        : 'bg-white hover:bg-emerald-50/70 border-slate-200 hover:border-emerald-400 hover:shadow-xs active:scale-98 cursor-pointer'
-                    }`}
-                  >
-                    <img
-                      src={prod.image_url || DEFAULT_IMG}
-                      alt={prod.name}
-                      className="w-10 h-10 rounded-lg object-contain p-0.5 bg-white border border-slate-200 shrink-0"
-                      onError={(e) => {
-                        e.target.onerror = null;
-                        e.target.src = DEFAULT_IMG;
-                      }}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h6 className="font-bold text-xs text-slate-900 truncate leading-snug" title={displayName}>
-                        {displayName}
-                      </h6>
-                      <div className="flex items-center justify-between mt-1">
-                        <span className="text-xs font-black text-emerald-800">
-                          {currency}{prod.selling_price}
-                        </span>
-                        <span
-                          className={`text-[9px] font-black px-1.5 py-0.2 rounded border ${
-                            isOut
-                              ? 'bg-red-100 text-red-800 border-red-300'
-                              : isLow
-                              ? 'bg-yellow-100 text-amber-900 border-yellow-300 font-bold'
-                              : 'bg-emerald-100 text-emerald-800 border-emerald-300'
-                          }`}
-                        >
-                          {isOut ? '0 left' : `${avail} left`}
-                        </span>
-                      </div>
-                    </div>
-                    <Plus className="w-4 h-4 text-emerald-700 shrink-0 opacity-75 group-hover:opacity-100 group-hover:scale-110 transition" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
           {/* Product Catalog Grid (Expands to 3-4 columns) */}
           <div className="bg-white p-3.5 rounded-2xl shadow-xs border border-slate-200">
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[660px] overflow-y-auto pr-1">
@@ -635,14 +575,14 @@ export default function PosBilling({
           </div>
         </div>
 
-        {/* COLUMN 2: Active Cart & Checkout (Expanded width) */}
-        <div className="w-full xl:w-[480px] 2xl:w-[520px] flex-shrink-0 space-y-3">
-          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col">
+        {/* COLUMN 2: Active Cart & Checkout (Pinned so Finalize never goes under page) */}
+        <div className="w-full xl:w-[480px] 2xl:w-[520px] flex-shrink-0 xl:sticky xl:top-3 xl:h-[calc(100vh-80px)] flex flex-col">
+          <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col h-full max-h-[calc(100vh-80px)]">
             
             {/* Multi-Bill Hold & Resume Tabs */}
-            <div className="bg-emerald-900 px-3.5 py-2.5 flex items-center justify-between border-b border-emerald-800">
+            <div className="bg-emerald-900 px-3.5 py-2.5 flex items-center justify-between border-b border-emerald-800 shrink-0">
               <span className="text-sm sm:text-base font-black text-yellow-300 uppercase tracking-wider">
-                ACTIVE BILL:
+                ACTIVE CART:
               </span>
               <div className="flex space-x-1.5">
                 {[0, 1, 2].map((slotIdx) => {
@@ -658,7 +598,7 @@ export default function PosBilling({
                           : 'bg-emerald-800 text-emerald-200 hover:bg-emerald-700'
                       }`}
                     >
-                      <span>Bill #{slotIdx + 1}</span>
+                      <span>Bill {slotIdx + 1}</span>
                       {slotItemCount > 0 && (
                         <span
                           className={`text-xs px-2 py-0.5 rounded-full font-black ${
@@ -675,7 +615,7 @@ export default function PosBilling({
             </div>
 
             {/* Cart Header */}
-            <div className="bg-emerald-800 text-white px-4 py-3 flex items-center justify-between">
+            <div className="bg-emerald-800 text-white px-4 py-3 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-2.5">
                 <ShoppingCart className="w-5 h-5 text-yellow-300 flex-shrink-0" />
                 <span className="font-mono font-black text-xs sm:text-sm text-yellow-300 bg-emerald-950/90 px-2.5 py-1 rounded-md border border-emerald-700/60 shadow-inner">
@@ -697,13 +637,13 @@ export default function PosBilling({
               )}
             </div>
 
-            {/* Cart Items List */}
-            <div className="p-3.5 overflow-y-auto max-h-[460px] divide-y divide-slate-100">
+            {/* Cart Items List (Flexes and scrolls internally) */}
+            <div className="p-3 overflow-y-auto flex-1 min-h-[120px] divide-y divide-slate-100">
               {cart.length === 0 ? (
-                <div className="py-16 text-center text-slate-400 space-y-2">
+                <div className="py-12 text-center text-slate-400 space-y-2">
                   <ShoppingCart className="w-12 h-12 mx-auto text-slate-300 stroke-[1.5]" />
                   <p className="text-base font-bold text-slate-600">Cart is empty</p>
-                  <p className="text-xs text-slate-400">Scan barcode, tap quick add, or search catalog</p>
+                  <p className="text-xs text-slate-400">Scan barcode, tap item in catalog, or search</p>
                 </div>
               ) : (
                 cart.map((item) => {
@@ -770,7 +710,7 @@ export default function PosBilling({
             </div>
 
             {/* Customer Details Form */}
-            <div className="p-3.5 bg-slate-50 border-t border-slate-200 space-y-2">
+            <div className="p-3 bg-slate-50 border-t border-slate-200 space-y-1.5 shrink-0">
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-0.5">
@@ -799,22 +739,18 @@ export default function PosBilling({
               </div>
             </div>
 
-            {/* Cart Summary & Checkout */}
+            {/* Cart Summary & Checkout (Pinned at bottom of card - never goes under page!) */}
             {cart.length > 0 && (
-              <div className="p-4 bg-emerald-50/60 border-t border-emerald-100 space-y-3">
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between text-xs sm:text-sm text-slate-600">
-                    <span>Total Quantity:</span>
-                    <span className="font-bold text-slate-900">{totalItemsCount} units</span>
-                  </div>
-                  <div className="flex items-center justify-between text-base sm:text-lg font-black text-slate-900 pt-1 border-t border-emerald-200/60">
+              <div className="p-3.5 bg-emerald-50/80 border-t border-emerald-100 space-y-2.5 shrink-0">
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-base sm:text-lg font-black text-slate-900">
                     <span>Payable Total:</span>
                     <div className="text-xl sm:text-2xl font-black text-emerald-700">
                       {currency}{grandTotal.toFixed(2)}
                     </div>
                   </div>
                   {totalSavings > 0 && (
-                    <div className="flex items-center justify-between text-xs font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2.5 py-1 rounded-lg">
+                    <div className="flex items-center justify-between text-xs font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-300 px-2.5 py-0.5 rounded-lg">
                       <span>Customer Savings (MRP):</span>
                       <span>🎉 {currency}{totalSavings.toFixed(2)}</span>
                     </div>
@@ -824,7 +760,7 @@ export default function PosBilling({
                 <button
                   type="button"
                   onClick={onCheckoutClick}
-                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-base sm:text-lg py-3.5 px-4 rounded-xl shadow-md hover:shadow-lg flex items-center justify-center space-x-2 transition cursor-pointer"
+                  className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-base sm:text-lg py-3 px-4 rounded-xl shadow-md hover:shadow-lg flex items-center justify-center space-x-2 transition cursor-pointer"
                 >
                   <CreditCard className="w-5 h-5 text-yellow-300" />
                   <span>Finalize & Generate UPI QR (F8)</span>

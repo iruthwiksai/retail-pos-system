@@ -283,7 +283,7 @@ export default function StockInModal({
   // Confirm & Add Inventory (Right Action)
   const handleConfirmAndAddToStock = async () => {
     if (billItems.length === 0) {
-      alert('Vendor bill is empty. Please add at least one product using "Add Product to Vendor Bill".');
+      alert('Vendor cart is empty. Please add at least one product using "Add to Cart".');
       return;
     }
 
@@ -688,7 +688,7 @@ export default function StockInModal({
                   disabled={addingProductToBill || (!selectedProductId && !newProductName.trim())}
                   className="flex-1 py-2.5 px-4 bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs sm:text-sm rounded-xl flex items-center justify-center space-x-1.5 shadow-md transition disabled:opacity-50"
                 >
-                  <span>{addingProductToBill ? 'Adding...' : 'Add Product to Vendor Bill'}</span>
+                  <span>{addingProductToBill ? 'Adding...' : 'Add to Cart'}</span>
                 </button>
               </div>
 
@@ -706,7 +706,7 @@ export default function StockInModal({
           </div>
 
 
-          {/* ================= RIGHT PANEL: VENDOR BILL & CONFIRM ================= */}
+          {/* ================= RIGHT PANEL: VENDOR CART & CONFIRM ================= */}
           <div className="lg:col-span-6 bg-white p-3.5 rounded-xl border-2 border-emerald-400 shadow-sm flex flex-col justify-between space-y-2.5">
             
             <div className="space-y-2.5 flex-1 flex flex-col">
@@ -714,7 +714,7 @@ export default function StockInModal({
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h4 className="font-black text-sm sm:text-base text-slate-900">
-                  Vendor Bill
+                  Vendor Cart
                 </h4>
                 <span className="text-xs font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full">
                   {billItems.length} {billItems.length === 1 ? 'Product' : 'Products'}
@@ -737,7 +737,7 @@ export default function StockInModal({
                       <tr>
                         <td colSpan="4" className="py-8 text-center text-slate-400 font-medium">
                           <Package className="w-6 h-6 mx-auto mb-1 text-slate-300" />
-                          No products in bill yet.
+                          No products in cart yet.
                         </td>
                       </tr>
                     ) : (

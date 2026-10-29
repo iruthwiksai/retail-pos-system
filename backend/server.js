@@ -462,24 +462,31 @@ app.post('/api/settings', sensitiveActionLimiter, requireManagerRole, (req, res)
 app.get('/api/products', (req, res) => {
   try {
     const { q, category, low_stock } = req.query;
-    let query = 'SELECT * FROM products WHERE COALESCE(is_active, 1) = 1';
+    let query = `
+      SELECT p.*,
+             COUNT(oi.id) as times_ordered,
+             COALESCE(SUM(oi.quantity), 0) as total_qty_sold
+      FROM products p
+      LEFT JOIN order_items oi ON oi.product_id = p.id
+      WHERE COALESCE(p.is_active, 1) = 1
+    `;
     const params = [];
 
     if (q) {
-      query += ' AND (name LIKE ? OR barcode LIKE ? OR category LIKE ?)';
+      query += ' AND (p.name LIKE ? OR p.barcode LIKE ? OR p.category LIKE ?)';
       params.push(`%${q}%`, `%${q}%`, `%${q}%`);
     }
 
     if (category && category !== 'All') {
-      query += ' AND category = ?';
+      query += ' AND p.category = ?';
       params.push(category);
     }
 
     if (low_stock === 'true') {
-      query += ' AND stock <= low_stock_threshold';
+      query += ' AND p.stock <= p.low_stock_threshold';
     }
 
-    query += ' ORDER BY name ASC';
+    query += ' GROUP BY p.id ORDER BY times_ordered DESC, total_qty_sold DESC, p.name ASC';
     const products = db.prepare(query).all(...params);
     res.json(products);
   } catch (err) {
