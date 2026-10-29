@@ -19,205 +19,137 @@ import { getTranslatedProductName } from '../utils/productTranslations';
 
 const DEFAULT_IMG = 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=150&auto=format&fit=crop&q=80';
 
-// KG Weight & Cost Calculator Dropdown (for items sold in kg)
+// KG Weight & Cost Calculator Dropdown (Contains exactly 2 boxes: Weight in gm on left, Amount on right)
 function KgCalculatorDropdown({ item, currency, onApplyQty, onClose }) {
-  const [customWeight, setCustomWeight] = useState(String(item.quantity || '0.5'));
-  const [weightUnit, setWeightUnit] = useState('kg'); // 'kg' | 'g'
+  const [customWeightGm, setCustomWeightGm] = useState('100'); // default 100gm
   const [customAmount, setCustomAmount] = useState('50');
 
-  // 1. Cost per custom weight calculation
-  const weightNum = parseFloat(customWeight) || 0;
-  const weightInKg = weightUnit === 'g' ? weightNum / 1000 : weightNum;
+  // Left Box: Custom Weight always in gm
+  const weightGmNum = parseFloat(customWeightGm) || 0;
+  const weightInKg = weightGmNum / 1000;
   const calculatedCost = (weightInKg * (item.selling_price || 0)).toFixed(2);
 
-  // 2. Quantity per custom amount calculation
+  // Right Box: Custom Amount
   const amountNum = parseFloat(customAmount) || 0;
   const calculatedWeightKg = item.selling_price > 0 ? (amountNum / item.selling_price) : 0;
-  const calculatedWeightGrams = Math.round(calculatedWeightKg * 1000);
+  const calculatedWeightGm = Math.round(calculatedWeightKg * 1000);
 
   return (
-    <div className="mt-2 p-2.5 sm:p-3 bg-emerald-50/95 border-2 border-emerald-400 rounded-xl space-y-2.5 text-xs shadow-md animate-fadeIn">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-emerald-200 pb-1.5">
-        <div className="flex items-center space-x-1.5 font-black text-emerald-950 text-xs sm:text-sm">
-          <Scale className="w-4 h-4 text-emerald-700 shrink-0" />
-          <span>KG Price & Weight Calculator</span>
+    <div className="mt-2 p-2.5 bg-emerald-50/95 border-2 border-emerald-400 rounded-xl space-y-2 text-xs shadow-md animate-fadeIn">
+      {/* Header bar with rate */}
+      <div className="flex items-center justify-between border-b border-emerald-200/80 pb-1.5 px-0.5">
+        <div className="flex items-center space-x-1.5 font-black text-emerald-950 text-xs">
+          <Scale className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+          <span>KG Assistant</span>
           <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded border border-emerald-300">
-            {currency}{item.selling_price}/kg
+            {currency}{item.selling_price} / kg
           </span>
         </div>
         <button
           type="button"
           onClick={onClose}
-          className="text-xs font-bold px-2 py-0.5 bg-white hover:bg-emerald-100 text-emerald-800 rounded-md border border-emerald-300 transition cursor-pointer"
+          className="text-[11px] font-bold px-2 py-0.5 bg-white hover:bg-emerald-100 text-emerald-800 rounded-md border border-emerald-300 transition cursor-pointer"
         >
           ✕ Close
         </button>
       </div>
 
-      {/* 1. COST PER CUSTOM WEIGHT */}
-      <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
-        <div className="flex items-center justify-between">
-          <span className="font-extrabold text-[11px] sm:text-xs text-slate-800">
-            1. Cost for Custom Weight:
-          </span>
-          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setWeightUnit('kg')}
-              className={`px-2 py-0.5 rounded-md text-[10px] font-black transition cursor-pointer ${
-                weightUnit === 'kg' ? 'bg-emerald-700 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              kg
-            </button>
-            <button
-              type="button"
-              onClick={() => setWeightUnit('g')}
-              className={`px-2 py-0.5 rounded-md text-[10px] font-black transition cursor-pointer ${
-                weightUnit === 'g' ? 'bg-emerald-700 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              grams
-            </button>
+      {/* Exactly 2 Boxes: Left = Custom Weight in gm (default 100gm), Right = Custom Amount */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* BOX 1 (LEFT): CUSTOM WEIGHT IN GM (Default: 100 gm) */}
+        <div className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col justify-between space-y-2 shadow-2xs">
+          <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-800">
+            <span>Weight (gm)</span>
+            <span className="text-[10px] text-slate-500 font-bold">
+              {weightInKg > 0 ? `${weightInKg.toFixed(3)} kg` : ''}
+            </span>
           </div>
-        </div>
 
-        <div className="flex items-center space-x-2">
-          <div className="relative flex-1">
+          <div className="relative">
             <input
               type="number"
               step="any"
-              min="0"
-              placeholder={weightUnit === 'kg' ? 'e.g. 0.75' : 'e.g. 750'}
-              value={customWeight}
-              onChange={(e) => setCustomWeight(e.target.value)}
-              className="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded-lg font-black text-xs sm:text-sm text-slate-900 outline-none focus:border-emerald-600"
+              min="1"
+              placeholder="100"
+              value={customWeightGm}
+              onChange={(e) => setCustomWeightGm(e.target.value)}
+              className="w-full pl-2.5 pr-8 py-1.5 border-2 border-slate-300 rounded-lg font-black text-xs sm:text-sm text-slate-900 outline-none focus:border-emerald-600"
             />
-            <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 uppercase">
-              {weightUnit}
+            <span className="absolute right-2.5 top-2 text-[10px] font-black text-slate-400 uppercase">
+              gm
             </span>
           </div>
 
-          <div className="text-right shrink-0 px-1">
-            <span className="text-[10px] font-bold text-slate-400 block leading-none">Cost:</span>
-            <span className="text-sm font-black text-emerald-800">
-              {currency}{calculatedCost}
-            </span>
-          </div>
+          <div className="flex items-center justify-between pt-0.5">
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold block leading-tight">Cost:</span>
+              <span className="text-xs sm:text-sm font-black text-emerald-800">
+                {currency}{calculatedCost}
+              </span>
+            </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              if (weightInKg > 0) {
-                onApplyQty(weightInKg);
-                onClose();
-              }
-            }}
-            disabled={weightInKg <= 0}
-            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-xs rounded-lg transition shadow-2xs shrink-0 cursor-pointer active:scale-95"
-          >
-            Apply Qty
-          </button>
-        </div>
-
-        {/* Quick weight presets */}
-        <div className="flex items-center space-x-1 pt-0.5 overflow-x-auto pb-0.5">
-          {[
-            { label: '100g', kg: 0.1 },
-            { label: '250g', kg: 0.25 },
-            { label: '500g', kg: 0.5 },
-            { label: '750g', kg: 0.75 },
-            { label: '1 kg', kg: 1 },
-            { label: '1.5 kg', kg: 1.5 },
-            { label: '2 kg', kg: 2 },
-            { label: '5 kg', kg: 5 }
-          ].map((preset) => (
             <button
-              key={preset.label}
               type="button"
               onClick={() => {
-                setWeightUnit('kg');
-                setCustomWeight(String(preset.kg));
-                onApplyQty(preset.kg);
-                onClose();
+                if (weightInKg > 0) {
+                  onApplyQty(weightInKg);
+                  onClose();
+                }
               }}
-              className="px-2 py-0.5 bg-slate-50 hover:bg-emerald-100 text-slate-750 hover:text-emerald-900 rounded-md text-[10px] font-extrabold border border-slate-200 shrink-0 cursor-pointer transition active:scale-95"
+              disabled={weightInKg <= 0}
+              className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-[11px] rounded-lg transition shadow-2xs cursor-pointer active:scale-95"
             >
-              {preset.label}
+              Apply Qty
             </button>
-          ))}
+          </div>
         </div>
-      </div>
 
-      {/* 2. QUANTITY PER CUSTOM AMOUNT */}
-      <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
-        <span className="font-extrabold text-[11px] sm:text-xs text-slate-800 block">
-          2. Quantity for Custom Amount:
-        </span>
+        {/* BOX 2 (RIGHT): CUSTOM AMOUNT */}
+        <div className="bg-white p-2.5 rounded-xl border border-emerald-200 flex flex-col justify-between space-y-2 shadow-2xs">
+          <div className="flex items-center justify-between text-[11px] font-extrabold text-slate-800">
+            <span>Amount ({currency})</span>
+            <span className="text-[10px] text-slate-500 font-bold">
+              {calculatedWeightGm > 0 ? `${calculatedWeightGm} gm` : ''}
+            </span>
+          </div>
 
-        <div className="flex items-center space-x-2">
-          <div className="relative flex-1">
+          <div className="relative">
             <span className="absolute left-2.5 top-1.5 text-xs font-bold text-slate-400">
               {currency}
             </span>
             <input
               type="number"
               step="any"
-              min="0"
-              placeholder="e.g. 50"
+              min="1"
+              placeholder="50"
               value={customAmount}
               onChange={(e) => setCustomAmount(e.target.value)}
               className="w-full pl-6 pr-2.5 py-1.5 border-2 border-slate-300 rounded-lg font-black text-xs sm:text-sm text-slate-900 outline-none focus:border-emerald-600"
             />
           </div>
 
-          <div className="text-right shrink-0 px-1">
-            <span className="text-[10px] font-bold text-slate-400 block leading-none">Weight:</span>
-            <span className="text-sm font-black text-emerald-800">
-              {calculatedWeightKg.toFixed(3)} kg
-              <span className="text-[10px] font-bold text-slate-500 block">
-                ({calculatedWeightGrams}g)
+          <div className="flex items-center justify-between pt-0.5">
+            <div>
+              <span className="text-[10px] text-slate-400 font-semibold block leading-tight">Weight:</span>
+              <span className="text-xs sm:text-sm font-black text-emerald-800">
+                {calculatedWeightKg.toFixed(3)} kg
               </span>
-            </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                if (calculatedWeightKg > 0) {
+                  onApplyQty(parseFloat(calculatedWeightKg.toFixed(3)));
+                  onClose();
+                }
+              }}
+              disabled={calculatedWeightKg <= 0}
+              className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-[11px] rounded-lg transition shadow-2xs cursor-pointer active:scale-95"
+            >
+              Apply Qty
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (calculatedWeightKg > 0) {
-                onApplyQty(parseFloat(calculatedWeightKg.toFixed(3)));
-                onClose();
-              }
-            }}
-            disabled={calculatedWeightKg <= 0}
-            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-xs rounded-lg transition shadow-2xs shrink-0 cursor-pointer active:scale-95"
-          >
-            Apply Qty
-          </button>
-        </div>
-
-        {/* Quick amount presets */}
-        <div className="flex items-center space-x-1 pt-0.5 overflow-x-auto pb-0.5">
-          {[10, 20, 30, 50, 100, 200].map((amt) => {
-            const kgVal = item.selling_price > 0 ? parseFloat((amt / item.selling_price).toFixed(3)) : 0;
-            return (
-              <button
-                key={amt}
-                type="button"
-                onClick={() => {
-                  setCustomAmount(String(amt));
-                  if (kgVal > 0) {
-                    onApplyQty(kgVal);
-                    onClose();
-                  }
-                }}
-                className="px-2 py-0.5 bg-slate-50 hover:bg-emerald-100 text-slate-750 hover:text-emerald-900 rounded-md text-[10px] font-extrabold border border-slate-200 shrink-0 cursor-pointer transition active:scale-95"
-              >
-                {currency}{amt} ({kgVal} kg)
-              </button>
-            );
-          })}
         </div>
       </div>
     </div>
@@ -604,11 +536,11 @@ export default function PosBilling({
         </div>
       )}
 
-      {/* 2-COLUMN LAYOUT: Catalog & Quick Add | Active Cart */}
+      {/* 2-COLUMN LAYOUT: 55% Catalog | 45% Active Cart */}
       <div className="flex flex-col xl:flex-row gap-4 items-stretch flex-1">
         
-        {/* COLUMN 1: Product Catalog & Search (Expands to fill all space till end of page) */}
-        <div className="flex-1 min-w-0 space-y-3 w-full flex flex-col">
+        {/* COLUMN 1: Product Catalog & Search (55% Width) */}
+        <div className="w-full xl:w-[calc(55%-8px)] flex-shrink-0 min-w-0 space-y-3 flex flex-col">
           
           {/* SEARCH BAR with Bell Chime Toggle & Translate Button */}
           <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-xs border border-slate-200">
@@ -824,8 +756,8 @@ export default function PosBilling({
           </div>
         </div>
 
-        {/* COLUMN 2: Active Cart & Checkout (Pinned so Finalize never goes under page) */}
-        <div className="w-full xl:w-[480px] 2xl:w-[520px] flex-shrink-0 xl:sticky xl:top-3 xl:h-[calc(100vh-80px)] flex flex-col">
+        {/* COLUMN 2: Active Cart & Checkout (45% Width - Pinned so Finalize never goes under page) */}
+        <div className="w-full xl:w-[calc(45%-8px)] flex-shrink-0 min-w-0 xl:sticky xl:top-3 xl:h-[calc(100vh-80px)] flex flex-col">
           <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col h-full max-h-[calc(100vh-80px)]">
             
             {/* Multi-Bill Hold & Resume Tabs */}
