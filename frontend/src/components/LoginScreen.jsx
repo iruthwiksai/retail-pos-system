@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Store, ShieldCheck, UserCheck, Lock, Delete, ArrowRight, Sparkles } from 'lucide-react';
+import { Store, Lock, Delete } from 'lucide-react';
 
 export default function LoginScreen({ settings = {}, onLoginSuccess }) {
-  const [selectedRole, setSelectedRole] = useState('manager'); // 'manager' | 'cashier'
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,18 +29,18 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pin, selectedRole, isSubmitting]);
+  }, [pin, isSubmitting]);
 
-  // Handle digit input
+  // Handle digit input (strictly 6 digits)
   const handleDigit = (digit) => {
-    if (pin.length >= 4) return;
+    if (pin.length >= 6) return;
     const newPin = pin + digit;
     setPin(newPin);
     setError('');
 
-    // Auto submit when 4 digits are completed
-    if (newPin.length === 4) {
-      submitPin(newPin, selectedRole);
+    // Auto submit when 6 digits are completed
+    if (newPin.length === 6) {
+      submitPin(newPin);
     }
   };
 
@@ -55,8 +54,8 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
     setError('');
   };
 
-  // Submit PIN to backend authentication API
-  const submitPin = async (pinToSubmit, roleToSubmit) => {
+  // Submit 6-digit PIN to backend authentication API
+  const submitPin = async (pinToSubmit) => {
     setIsSubmitting(true);
     setError('');
 
@@ -64,13 +63,13 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: pinToSubmit, role: roleToSubmit })
+        body: JSON.stringify({ pin: pinToSubmit })
       });
 
       const data = await res.json();
 
       if (!res.ok) {
-        throw new Error(data.error || 'Incorrect PIN. Please try again.');
+        throw new Error(data.error || 'Incorrect 6-digit PIN. Please try again.');
       }
 
       // Success: Save token & user profile
@@ -107,67 +106,28 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
           </p>
           <div className="inline-flex items-center space-x-1.5 mt-2.5 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-400/30 text-[11px] font-bold text-emerald-300">
             <Lock className="w-3 h-3" />
-            <span>Counter Terminal Locked</span>
+            <span>Terminal Locked</span>
           </div>
         </div>
 
-        {/* Role Selection Tabs */}
-        <div className="w-full grid grid-cols-2 gap-2.5 p-1.5 bg-black/30 rounded-2xl border border-white/10 mb-6">
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRole('manager');
-              setPin('');
-              setError('');
-            }}
-            className={`flex items-center justify-center space-x-2 py-3 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all duration-150 ${
-              selectedRole === 'manager'
-                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white shadow-lg shadow-emerald-600/30 ring-1 ring-emerald-400/50'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-yellow-300 shrink-0" />
-            <span>Owner / Manager</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedRole('cashier');
-              setPin('');
-              setError('');
-            }}
-            className={`flex items-center justify-center space-x-2 py-3 px-3 rounded-xl font-bold text-xs sm:text-sm transition-all duration-150 ${
-              selectedRole === 'cashier'
-                ? 'bg-gradient-to-r from-sky-600 to-sky-500 text-white shadow-lg shadow-sky-600/30 ring-1 ring-sky-400/50'
-                : 'text-slate-400 hover:text-white hover:bg-white/5'
-            }`}
-          >
-            <UserCheck className="w-4 h-4 text-sky-200 shrink-0" />
-            <span>Cashier / Staff</span>
-          </button>
-        </div>
-
-        {/* PIN Indicators (4 Dots) */}
-        <div className="flex flex-col items-center mb-6">
+        {/* PIN Indicators (6 Dots) */}
+        <div className="flex flex-col items-center mb-6 w-full">
           <p className="text-xs font-semibold text-slate-300 mb-3 uppercase tracking-wider">
-            Enter 4-Digit {selectedRole === 'manager' ? 'Owner' : 'Cashier'} PIN
+            Enter 6-Digit Passcode
           </p>
           <div
-            className={`flex items-center space-x-4 h-12 px-6 py-2 rounded-2xl bg-black/40 border border-white/10 ${
+            className={`flex items-center justify-center space-x-3.5 h-12 px-6 py-2 rounded-2xl bg-black/40 border border-white/10 ${
               shake ? 'animate-shake border-red-500/80 bg-red-950/30' : ''
             }`}
           >
-            {[0, 1, 2, 3].map((idx) => {
+            {[0, 1, 2, 3, 4, 5].map((idx) => {
               const isFilled = pin.length > idx;
               return (
                 <div
                   key={idx}
-                  className={`w-4 h-4 rounded-full transition-all duration-200 ${
+                  className={`w-3.5 h-3.5 rounded-full transition-all duration-200 ${
                     isFilled
-                      ? selectedRole === 'manager'
-                        ? 'bg-yellow-400 shadow-md shadow-yellow-400/50 scale-125'
-                        : 'bg-sky-400 shadow-md shadow-sky-400/50 scale-125'
+                      ? 'bg-yellow-400 shadow-md shadow-yellow-400/50 scale-125'
                       : 'border-2 border-white/30 bg-transparent'
                   }`}
                 />
@@ -183,7 +143,7 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
           ) : isSubmitting ? (
             <p className="text-xs font-bold text-emerald-300 mt-2.5 flex items-center space-x-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              <span>Verifying PIN...</span>
+              <span>Verifying Passcode...</span>
             </p>
           ) : (
             <p className="text-[11px] text-slate-400 mt-2 text-center">
@@ -193,7 +153,7 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
         </div>
 
         {/* Touchscreen Numeric Keypad */}
-        <div className="w-full max-w-[320px] grid grid-cols-3 gap-2.5 mb-5">
+        <div className="w-full max-w-[320px] grid grid-cols-3 gap-2.5 mb-2">
           {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
             <button
               key={digit}
@@ -236,12 +196,6 @@ export default function LoginScreen({ settings = {}, onLoginSuccess }) {
           </button>
         </div>
 
-        {/* Counter Helper Footer */}
-        <div className="w-full bg-black/30 border border-white/10 rounded-xl px-3 py-2 text-center">
-          <p className="text-[11px] text-slate-300">
-            <span className="font-bold text-yellow-300">Default PINs:</span> Owner PIN: <strong className="text-white font-mono bg-white/10 px-1.5 py-0.5 rounded">1234</strong> | Cashier PIN: <strong className="text-white font-mono bg-white/10 px-1.5 py-0.5 rounded">0000</strong>
-          </p>
-        </div>
       </div>
     </div>
   );

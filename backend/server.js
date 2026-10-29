@@ -124,9 +124,9 @@ function authenticate(req, res, next) {
   const pinHeader = req.headers['x-manager-pin'];
   if (pinHeader) {
     const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
-    const configuredPin = configuredPinRow?.value || '1234';
+    const configuredPin = configuredPinRow?.value || '123456';
     if (pinHeader.toString().trim() === configuredPin) {
-      req.user = { role: 'manager', name: 'Owner / Manager' };
+      req.user = { role: 'manager', name: 'Owner' };
       return next();
     }
   }
@@ -136,7 +136,7 @@ function authenticate(req, res, next) {
 }
 app.use('/api', authenticate);
 
-// Middleware to ensure user is logged in (Cashier or Manager)
+// Middleware to ensure user is logged in (Staff or Owner)
 function requireAuth(req, res, next) {
   if (!req.user) {
     return res.status(401).json({ error: 'Authentication required. Please enter your PIN to login.' });
@@ -144,7 +144,7 @@ function requireAuth(req, res, next) {
   next();
 }
 
-// Middleware to ensure Manager / Owner role (or valid Manager PIN)
+// Middleware to ensure Owner role (or valid Owner PIN)
 function requireManagerRole(req, res, next) {
   if (req.user && req.user.role === 'manager') {
     return next();
@@ -156,15 +156,15 @@ function requireManagerRole(req, res, next) {
   const providedPin = (pinFromHeader || pinFromBody || pinFromQuery || '').toString().trim();
 
   const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
-  const configuredPin = configuredPinRow?.value || '1234';
+  const configuredPin = configuredPinRow?.value || '123456';
 
   if (providedPin && providedPin === configuredPin) {
-    req.user = { role: 'manager', name: 'Owner / Manager' };
+    req.user = { role: 'manager', name: 'Owner' };
     return next();
   }
 
   return res.status(403).json({
-    error: 'Manager / Owner permissions required for this action. Please enter Manager PIN.'
+    error: 'Owner permissions required for this action. Please enter Owner PIN.'
   });
 }
 const requireManagerPin = requireManagerRole;
@@ -258,49 +258,40 @@ app.get('/api/dashboard/widgets', (req, res) => {
 // ----------------- AUTHENTICATION API -----------------
 app.post('/api/auth/login', sensitiveActionLimiter, (req, res) => {
   try {
-    const { pin, role } = req.body || {};
+    const { pin } = req.body || {};
     if (!pin) {
-      return res.status(400).json({ error: 'Please enter a 4-digit PIN' });
+      return res.status(400).json({ error: 'Please enter a 6-digit PIN' });
     }
 
     const pinStr = String(pin).trim();
+    if (!/^\d{6}$/.test(pinStr)) {
+      return res.status(400).json({ error: 'PIN must be strictly 6 numeric digits' });
+    }
+
     const managerPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
     const cashierPinRow = db.prepare("SELECT value FROM settings WHERE key = 'cashier_pin'").get();
+    const blockStaffRow = db.prepare("SELECT value FROM settings WHERE key = 'block_staff_access'").get();
     const storeNameRow = db.prepare("SELECT value FROM settings WHERE key = 'store_name'").get();
 
-    const managerPin = managerPinRow?.value || '1234';
-    const cashierPin = cashierPinRow?.value || '0000';
+    const managerPin = managerPinRow?.value || '123456';
+    const cashierPin = cashierPinRow?.value || '000000';
+    const isStaffBlocked = blockStaffRow?.value === 'true';
     const storeName = storeNameRow?.value || 'Mani Devi General Store';
 
     let determinedRole = null;
     let userName = '';
 
-    // If a specific role was selected on screen, verify against that role's PIN
-    if (role === 'manager') {
-      if (pinStr === managerPin) {
-        determinedRole = 'manager';
-        userName = 'Owner / Manager';
-      } else {
-        return res.status(401).json({ error: 'Incorrect PIN for Owner / Manager' });
+    if (pinStr === managerPin) {
+      determinedRole = 'manager';
+      userName = 'Owner';
+    } else if (pinStr === cashierPin) {
+      if (isStaffBlocked) {
+        return res.status(403).json({ error: 'Staff access is currently blocked by the Store Owner.' });
       }
-    } else if (role === 'cashier') {
-      if (pinStr === cashierPin) {
-        determinedRole = 'cashier';
-        userName = 'Cashier / Staff';
-      } else {
-        return res.status(401).json({ error: 'Incorrect PIN for Cashier' });
-      }
+      determinedRole = 'staff';
+      userName = 'Staff';
     } else {
-      // Auto-detect role by matching entered PIN
-      if (pinStr === managerPin) {
-        determinedRole = 'manager';
-        userName = 'Owner / Manager';
-      } else if (pinStr === cashierPin) {
-        determinedRole = 'cashier';
-        userName = 'Cashier / Staff';
-      } else {
-        return res.status(401).json({ error: 'Invalid PIN. Please try again.' });
-      }
+      return res.status(401).json({ error: 'Incorrect 6-digit PIN. Please try again.' });
     }
 
     // 7-day token expiration for tablet POS counter continuity
@@ -334,26 +325,26 @@ app.get('/api/auth/me', (req, res) => {
   return res.status(401).json({ authenticated: false, error: 'Not authenticated' });
 });
 
-// Fast Manager Elevation Check (allows Cashier to unlock Manager tabs/actions on-the-spot)
+// Fast Manager Elevation Check (allows Owner approval on-the-spot)
 app.post('/api/auth/verify-manager-pin', sensitiveActionLimiter, (req, res) => {
   try {
     const { pin } = req.body || {};
     const pinStr = (pin || '').toString().trim();
     const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
-    const configuredPin = configuredPinRow?.value || '1234';
+    const configuredPin = configuredPinRow?.value || '123456';
 
     if (pinStr && pinStr === configuredPin) {
       const exp = Date.now() + 7 * 24 * 60 * 60 * 1000;
       const storeNameRow = db.prepare("SELECT value FROM settings WHERE key = 'store_name'").get();
       const token = signToken({
         role: 'manager',
-        name: 'Owner / Manager',
+        name: 'Owner',
         store: storeNameRow?.value || 'Mani Devi General Store',
         exp
       });
-      return res.json({ valid: true, token, role: 'manager', name: 'Owner / Manager' });
+      return res.json({ valid: true, token, role: 'manager', name: 'Owner' });
     }
-    return res.status(401).json({ valid: false, error: 'Incorrect Manager PIN' });
+    return res.status(401).json({ valid: false, error: 'Incorrect Owner Password' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -394,13 +385,28 @@ const ALLOWED_SETTINGS_KEYS = new Set([
   'currency_symbol',
   'receipt_footer_msg',
   'manager_pin',
-  'cashier_pin'
+  'cashier_pin',
+  'block_staff_access'
 ]);
 
 app.post('/api/settings', sensitiveActionLimiter, requireManagerRole, (req, res) => {
   try {
     if (!req.body || typeof req.body !== 'object') {
       return res.status(400).json({ error: 'Invalid settings body' });
+    }
+
+    // Require current password when modifying Manager PIN or Staff PIN
+    const isChangingPassword = req.body.manager_pin !== undefined || req.body.cashier_pin !== undefined;
+    if (isChangingPassword) {
+      const currentPassword = (req.body.current_password || req.headers['x-current-password'] || '').toString().trim();
+      const configuredPinRow = db.prepare("SELECT value FROM settings WHERE key = 'manager_pin'").get();
+      const configuredPin = configuredPinRow?.value || '123456';
+
+      if (!currentPassword || currentPassword !== configuredPin) {
+        return res.status(401).json({
+          error: 'Current Owner Password is required and must be correct to change passwords.'
+        });
+      }
     }
 
     // Validate UPI ID format if provided
@@ -412,20 +418,25 @@ app.post('/api/settings', sensitiveActionLimiter, requireManagerRole, (req, res)
       }
     }
 
-    // Validate Manager PIN if updated
+    // Validate Manager PIN if updated (strictly 6 digits)
     if (req.body.manager_pin) {
       const pinStr = String(req.body.manager_pin).trim();
-      if (!/^\d{4}$/.test(pinStr)) {
-        return res.status(400).json({ error: 'Manager PIN must be a 4-digit number (e.g. 1234)' });
+      if (!/^\d{6}$/.test(pinStr)) {
+        return res.status(400).json({ error: 'Owner Password must be strictly 6 digits (e.g. 123456)' });
       }
     }
 
-    // Validate Cashier PIN if updated
+    // Validate Cashier PIN if updated (strictly 6 digits)
     if (req.body.cashier_pin) {
       const pinStr = String(req.body.cashier_pin).trim();
-      if (!/^\d{4}$/.test(pinStr)) {
-        return res.status(400).json({ error: 'Cashier PIN must be a 4-digit number (e.g. 0000)' });
+      if (!/^\d{6}$/.test(pinStr)) {
+        return res.status(400).json({ error: 'Staff Password must be strictly 6 digits (e.g. 000000)' });
       }
+    }
+
+    // Normalize block_staff_access boolean string
+    if (req.body.block_staff_access !== undefined) {
+      req.body.block_staff_access = String(req.body.block_staff_access).toLowerCase() === 'true' ? 'true' : 'false';
     }
 
     // Filter strictly to allowed keys (reject junk/injected keys)

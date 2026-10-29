@@ -4,7 +4,6 @@ import PosBilling from './components/PosBilling';
 import UpiPaymentModal from './components/UpiPaymentModal';
 import ReceiptModal from './components/ReceiptModal';
 import LoginScreen from './components/LoginScreen';
-import ManagerElevationModal from './components/ManagerElevationModal';
 
 // Code-split heavy non-critical modules so POS billing loads instantly on tablets
 const OrdersHistory = lazy(() => import('./components/OrdersHistory'));
@@ -58,9 +57,14 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
 
-  // Manager Elevation Modal (for Cashiers wanting to access restricted tabs)
-  const [isElevationOpen, setIsElevationOpen] = useState(false);
-  const [elevationTarget, setElevationTarget] = useState('');
+  const isManager = currentUser?.role === 'manager';
+
+  // Safeguard: If non-manager is on inventory or analytics, force them to POS
+  useEffect(() => {
+    if (isAuthenticated && !isManager && (activeTab === 'inventory' || activeTab === 'analytics')) {
+      setActiveTab('pos');
+    }
+  }, [isAuthenticated, isManager, activeTab]);
 
   // Helper to generate client fallback Order ID
   const generateClientOrderId = (offset = 0) => {
@@ -129,10 +133,10 @@ export default function App() {
               setCurrentUser(data.user);
               setIsAuthenticated(true);
             } else {
-              handleLock();
+              handleLogout();
             }
           } else {
-            handleLock();
+            handleLogout();
           }
         } catch (e) {
           console.error('Error checking auth session:', e);
@@ -168,42 +172,13 @@ export default function App() {
     refreshSlotOrderIds();
   };
 
-  // Lock / Logout terminal handler
-  const handleLock = () => {
+  // Logout terminal handler
+  const handleLogout = () => {
     localStorage.removeItem('pos_auth_token');
     localStorage.removeItem('pos_user');
     setIsAuthenticated(false);
     setCurrentUser(null);
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-  };
-
-  // Request Manager elevation for restricted tabs (inventory, analytics, settings)
-  const handleRequestManagerTab = (targetId) => {
-    if (currentUser?.role === 'manager') {
-      if (targetId === 'settings') {
-        setIsSettingsOpen(true);
-      } else {
-        setActiveTab(targetId);
-      }
-      return;
-    }
-
-    setElevationTarget(targetId);
-    setIsElevationOpen(true);
-  };
-
-  // Elevation success handler
-  const handleElevationSuccess = (data) => {
-    setCurrentUser({
-      role: 'manager',
-      name: 'Owner / Manager'
-    });
-
-    if (elevationTarget === 'settings') {
-      setIsSettingsOpen(true);
-    } else if (elevationTarget) {
-      setActiveTab(elevationTarget);
-    }
   };
 
   // Current slot info
@@ -283,27 +258,29 @@ export default function App() {
 
   const handleSaveSettings = async (newSettings) => {
     try {
-      const pin = newSettings.manager_pin || settings.manager_pin || '1234';
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'x-manager-pin': pin
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(newSettings)
       });
       if (res.ok) {
-        setSettings(newSettings);
+        setSettings((prev) => ({ ...prev, ...newSettings }));
+        fetchSettings();
+        return true;
       } else {
         const err = await res.json();
         alert(err.error || 'Failed to save settings');
+        return false;
       }
     } catch (err) {
       alert('Failed to save settings: ' + err.message);
+      return false;
     }
   };
 
-  // If not authenticated, show modern PIN lock screen
+  // If not authenticated, show unified 6-digit PIN login screen
   if (!isAuthenticated) {
     return (
       <LoginScreen
@@ -315,15 +292,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col font-sans text-slate-800 text-base">
-      {/* Navbar with role badge, lock button & permissions guard */}
+      {/* Navbar with role-restricted items and clean Logout */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         settings={settings}
         onOpenSettings={() => setIsSettingsOpen(true)}
         currentUser={currentUser}
-        onLock={handleLock}
-        onRequestManagerTab={handleRequestManagerTab}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
@@ -351,7 +327,8 @@ export default function App() {
           </Suspense>
         )}
 
-        {activeTab === 'inventory' && (
+        {/* Inventory: ONLY for Owner */}
+        {activeTab === 'inventory' && isManager && (
           <Suspense fallback={<TabLoadingFallback />}>
             <Inventory
               products={products}
@@ -361,7 +338,8 @@ export default function App() {
           </Suspense>
         )}
 
-        {activeTab === 'analytics' && (
+        {/* Analytics: ONLY for Owner */}
+        {activeTab === 'analytics' && isManager && (
           <Suspense fallback={<TabLoadingFallback />}>
             <Analytics
               settings={settings}
@@ -392,8 +370,8 @@ export default function App() {
         settings={settings}
       />
 
-      {/* Settings Modal (Lazy Loaded) */}
-      {isSettingsOpen && (
+      {/* Settings Modal (ONLY for Owner) */}
+      {isSettingsOpen && isManager && (
         <Suspense fallback={null}>
           <SettingsModal
             isOpen={isSettingsOpen}
@@ -402,24 +380,6 @@ export default function App() {
             onSaveSettings={handleSaveSettings}
           />
         </Suspense>
-      )}
-
-      {/* Manager Elevation Modal */}
-      {isElevationOpen && (
-        <ManagerElevationModal
-          isOpen={isElevationOpen}
-          onClose={() => setIsElevationOpen(false)}
-          onSuccess={handleElevationSuccess}
-          targetFeature={
-            elevationTarget === 'settings'
-              ? 'Store Settings'
-              : elevationTarget === 'inventory'
-              ? 'Store Inventory'
-              : elevationTarget === 'analytics'
-              ? 'Profit Analytics'
-              : 'this feature'
-          }
-        />
       )}
     </div>
   );

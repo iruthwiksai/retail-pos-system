@@ -135,8 +135,9 @@ function initDatabase() {
     { key: 'gstin', value: '27AABCS1429B1ZB' },
     { key: 'currency_symbol', value: '₹' },
     { key: 'receipt_footer_msg', value: 'Thank You For Shopping! Check items before leaving.' },
-    { key: 'manager_pin', value: '1234' },
-    { key: 'cashier_pin', value: '0000' }
+    { key: 'manager_pin', value: '123456' },
+    { key: 'cashier_pin', value: '000000' },
+    { key: 'block_staff_access', value: 'false' }
   ];
 
   const insertSetting = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)');
@@ -154,6 +155,9 @@ function initDatabase() {
   }
   db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'store_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'DMart Local Supermarket')").run();
   db.prepare("UPDATE settings SET value = 'Mani Devi General Store' WHERE key = 'upi_name' AND value IN ('Manidevi General Store', 'VijayaLakshmi Minimart', 'Smart Supermarket')").run();
+  // Migrate 4-digit PINs to 6-digit PINs
+  db.prepare("UPDATE settings SET value = '123456' WHERE key = 'manager_pin' AND value = '1234'").run();
+  db.prepare("UPDATE settings SET value = '000000' WHERE key = 'cashier_pin' AND value = '0000'").run();
 
   // Seed sample products if catalog is empty
   const count = db.prepare('SELECT COUNT(*) as count FROM products').get().count;
