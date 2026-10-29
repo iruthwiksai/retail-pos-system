@@ -303,7 +303,7 @@ export default function App() {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 pb-12">
+      <main className={`flex-1 ${activeTab === 'pos' ? 'pb-2' : 'pb-12'}`}>
         {activeTab === 'pos' && (
           <PosBilling
             products={products}

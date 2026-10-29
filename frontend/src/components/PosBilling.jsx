@@ -11,11 +11,218 @@ import {
   BellOff,
   Languages,
   Zap,
-  Check
+  Check,
+  Scale,
+  ChevronDown
 } from 'lucide-react';
 import { getTranslatedProductName } from '../utils/productTranslations';
 
 const DEFAULT_IMG = 'https://images.unsplash.com/photo-1542838132-92c53300491e?w=150&auto=format&fit=crop&q=80';
+
+// KG Weight & Cost Calculator Dropdown (for items sold in kg)
+function KgCalculatorDropdown({ item, currency, onApplyQty, onClose }) {
+  const [customWeight, setCustomWeight] = useState(String(item.quantity || '0.5'));
+  const [weightUnit, setWeightUnit] = useState('kg'); // 'kg' | 'g'
+  const [customAmount, setCustomAmount] = useState('50');
+
+  // 1. Cost per custom weight calculation
+  const weightNum = parseFloat(customWeight) || 0;
+  const weightInKg = weightUnit === 'g' ? weightNum / 1000 : weightNum;
+  const calculatedCost = (weightInKg * (item.selling_price || 0)).toFixed(2);
+
+  // 2. Quantity per custom amount calculation
+  const amountNum = parseFloat(customAmount) || 0;
+  const calculatedWeightKg = item.selling_price > 0 ? (amountNum / item.selling_price) : 0;
+  const calculatedWeightGrams = Math.round(calculatedWeightKg * 1000);
+
+  return (
+    <div className="mt-2 p-2.5 sm:p-3 bg-emerald-50/95 border-2 border-emerald-400 rounded-xl space-y-2.5 text-xs shadow-md animate-fadeIn">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-emerald-200 pb-1.5">
+        <div className="flex items-center space-x-1.5 font-black text-emerald-950 text-xs sm:text-sm">
+          <Scale className="w-4 h-4 text-emerald-700 shrink-0" />
+          <span>KG Price & Weight Calculator</span>
+          <span className="text-emerald-800 font-bold bg-white px-2 py-0.5 rounded border border-emerald-300">
+            {currency}{item.selling_price}/kg
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-xs font-bold px-2 py-0.5 bg-white hover:bg-emerald-100 text-emerald-800 rounded-md border border-emerald-300 transition cursor-pointer"
+        >
+          ✕ Close
+        </button>
+      </div>
+
+      {/* 1. COST PER CUSTOM WEIGHT */}
+      <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="font-extrabold text-[11px] sm:text-xs text-slate-800">
+            1. Cost for Custom Weight:
+          </span>
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setWeightUnit('kg')}
+              className={`px-2 py-0.5 rounded-md text-[10px] font-black transition cursor-pointer ${
+                weightUnit === 'kg' ? 'bg-emerald-700 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              kg
+            </button>
+            <button
+              type="button"
+              onClick={() => setWeightUnit('g')}
+              className={`px-2 py-0.5 rounded-md text-[10px] font-black transition cursor-pointer ${
+                weightUnit === 'g' ? 'bg-emerald-700 text-white shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              grams
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          <div className="relative flex-1">
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder={weightUnit === 'kg' ? 'e.g. 0.75' : 'e.g. 750'}
+              value={customWeight}
+              onChange={(e) => setCustomWeight(e.target.value)}
+              className="w-full px-2.5 py-1.5 border-2 border-slate-300 rounded-lg font-black text-xs sm:text-sm text-slate-900 outline-none focus:border-emerald-600"
+            />
+            <span className="absolute right-2.5 top-2 text-[10px] font-bold text-slate-400 uppercase">
+              {weightUnit}
+            </span>
+          </div>
+
+          <div className="text-right shrink-0 px-1">
+            <span className="text-[10px] font-bold text-slate-400 block leading-none">Cost:</span>
+            <span className="text-sm font-black text-emerald-800">
+              {currency}{calculatedCost}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (weightInKg > 0) {
+                onApplyQty(weightInKg);
+                onClose();
+              }
+            }}
+            disabled={weightInKg <= 0}
+            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-xs rounded-lg transition shadow-2xs shrink-0 cursor-pointer active:scale-95"
+          >
+            Apply Qty
+          </button>
+        </div>
+
+        {/* Quick weight presets */}
+        <div className="flex items-center space-x-1 pt-0.5 overflow-x-auto pb-0.5">
+          {[
+            { label: '100g', kg: 0.1 },
+            { label: '250g', kg: 0.25 },
+            { label: '500g', kg: 0.5 },
+            { label: '750g', kg: 0.75 },
+            { label: '1 kg', kg: 1 },
+            { label: '1.5 kg', kg: 1.5 },
+            { label: '2 kg', kg: 2 },
+            { label: '5 kg', kg: 5 }
+          ].map((preset) => (
+            <button
+              key={preset.label}
+              type="button"
+              onClick={() => {
+                setWeightUnit('kg');
+                setCustomWeight(String(preset.kg));
+                onApplyQty(preset.kg);
+                onClose();
+              }}
+              className="px-2 py-0.5 bg-slate-50 hover:bg-emerald-100 text-slate-750 hover:text-emerald-900 rounded-md text-[10px] font-extrabold border border-slate-200 shrink-0 cursor-pointer transition active:scale-95"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* 2. QUANTITY PER CUSTOM AMOUNT */}
+      <div className="bg-white p-2.5 rounded-xl border border-emerald-200 space-y-1.5">
+        <span className="font-extrabold text-[11px] sm:text-xs text-slate-800 block">
+          2. Quantity for Custom Amount:
+        </span>
+
+        <div className="flex items-center space-x-2">
+          <div className="relative flex-1">
+            <span className="absolute left-2.5 top-1.5 text-xs font-bold text-slate-400">
+              {currency}
+            </span>
+            <input
+              type="number"
+              step="any"
+              min="0"
+              placeholder="e.g. 50"
+              value={customAmount}
+              onChange={(e) => setCustomAmount(e.target.value)}
+              className="w-full pl-6 pr-2.5 py-1.5 border-2 border-slate-300 rounded-lg font-black text-xs sm:text-sm text-slate-900 outline-none focus:border-emerald-600"
+            />
+          </div>
+
+          <div className="text-right shrink-0 px-1">
+            <span className="text-[10px] font-bold text-slate-400 block leading-none">Weight:</span>
+            <span className="text-sm font-black text-emerald-800">
+              {calculatedWeightKg.toFixed(3)} kg
+              <span className="text-[10px] font-bold text-slate-500 block">
+                ({calculatedWeightGrams}g)
+              </span>
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (calculatedWeightKg > 0) {
+                onApplyQty(parseFloat(calculatedWeightKg.toFixed(3)));
+                onClose();
+              }
+            }}
+            disabled={calculatedWeightKg <= 0}
+            className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-black text-xs rounded-lg transition shadow-2xs shrink-0 cursor-pointer active:scale-95"
+          >
+            Apply Qty
+          </button>
+        </div>
+
+        {/* Quick amount presets */}
+        <div className="flex items-center space-x-1 pt-0.5 overflow-x-auto pb-0.5">
+          {[10, 20, 30, 50, 100, 200].map((amt) => {
+            const kgVal = item.selling_price > 0 ? parseFloat((amt / item.selling_price).toFixed(3)) : 0;
+            return (
+              <button
+                key={amt}
+                type="button"
+                onClick={() => {
+                  setCustomAmount(String(amt));
+                  if (kgVal > 0) {
+                    onApplyQty(kgVal);
+                    onClose();
+                  }
+                }}
+                className="px-2 py-0.5 bg-slate-50 hover:bg-emerald-100 text-slate-750 hover:text-emerald-900 rounded-md text-[10px] font-extrabold border border-slate-200 shrink-0 cursor-pointer transition active:scale-95"
+              >
+                {currency}{amt} ({kgVal} kg)
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function PosBilling({
   products,
@@ -33,6 +240,7 @@ export default function PosBilling({
   const [warningMsg, setWarningMsg] = useState('');
   const [language, setLanguage] = useState('en'); // 'en' | 'te' | 'hi_en'
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
+  const [expandedKgItem, setExpandedKgItem] = useState(null);
 
   const [widgetsData, setWidgetsData] = useState({
     recentOrders: [],
@@ -188,7 +396,7 @@ export default function PosBilling({
       playCartBellSound();
     }
 
-    const newQty = currentItem.quantity + delta;
+    const newQty = Math.round((currentItem.quantity + delta) * 1000) / 1000;
     if (newQty <= 0) {
       removeFromCart(productId);
       return;
@@ -206,8 +414,10 @@ export default function PosBilling({
   };
 
   const handleManualQuantityChange = (productId, val) => {
-    let newQty = parseInt(val, 10);
+    if (val === '') return;
+    let newQty = parseFloat(val);
     if (isNaN(newQty)) return;
+    newQty = Math.round(newQty * 1000) / 1000;
 
     const product = products.find((p) => p.id === productId);
     if (!product) return;
@@ -222,7 +432,7 @@ export default function PosBilling({
     const maxAllowedForThisSlot = Math.max(0, product.stock - otherSlotsAllocated);
 
     if (newQty > maxAllowedForThisSlot) {
-      showWarning(`Stock limit reached! Max available for this bill: ${maxAllowedForThisSlot} ${product.unit}`);
+      showWarning(`Stock limit reached! Max available for this cart: ${maxAllowedForThisSlot} ${product.unit}`);
       newQty = maxAllowedForThisSlot;
     }
 
@@ -239,7 +449,46 @@ export default function PosBilling({
       const updated = [...prevSlots];
       const slot = { ...updated[activeSlot] };
       slot.cart = slot.cart.map((item) =>
-        item.product_id === productId ? { ...item, quantity: Number(newQty) } : item
+        item.product_id === productId ? { ...item, quantity: newQty } : item
+      );
+      updated[activeSlot] = slot;
+      return updated;
+    });
+  };
+
+  // Set exact quantity (from KG Calculator)
+  const setExactCartQuantity = (productId, exactQty) => {
+    let newQty = parseFloat(exactQty);
+    if (isNaN(newQty)) return;
+    newQty = Math.round(newQty * 1000) / 1000;
+
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+
+    const otherSlotsAllocated = slots.reduce((total, s, idx) => {
+      if (idx === activeSlot) return total;
+      const item = s.cart.find((it) => it.product_id === productId);
+      return total + (item ? item.quantity : 0);
+    }, 0);
+
+    const maxAllowedForThisSlot = Math.max(0, product.stock - otherSlotsAllocated);
+    if (newQty > maxAllowedForThisSlot) {
+      showWarning(`Stock limit reached! Max available: ${maxAllowedForThisSlot} ${product.unit}`);
+      newQty = maxAllowedForThisSlot;
+    }
+
+    if (newQty <= 0) {
+      removeFromCart(productId);
+      return;
+    }
+
+    playCartBellSound();
+
+    setSlots((prevSlots) => {
+      const updated = [...prevSlots];
+      const slot = { ...updated[activeSlot] };
+      slot.cart = slot.cart.map((item) =>
+        item.product_id === productId ? { ...item, quantity: newQty } : item
       );
       updated[activeSlot] = slot;
       return updated;
@@ -346,7 +595,7 @@ export default function PosBilling({
   const totalItemsCount = cart.reduce((acc, item) => acc + item.quantity, 0);
 
   return (
-    <div className="max-w-[1680px] mx-auto px-3 sm:px-5 lg:px-6 py-4 space-y-3">
+    <div className="max-w-[1680px] mx-auto px-3 sm:px-5 lg:px-6 py-2 sm:py-3 space-y-3 min-h-[calc(100vh-80px)] flex flex-col">
       {/* Warning Alert Banner */}
       {warningMsg && (
         <div className="bg-red-600 text-white p-3 rounded-xl font-bold text-sm flex items-center justify-between shadow-lg">
@@ -356,10 +605,10 @@ export default function PosBilling({
       )}
 
       {/* 2-COLUMN LAYOUT: Catalog & Quick Add | Active Cart */}
-      <div className="flex flex-col xl:flex-row gap-4 items-start">
+      <div className="flex flex-col xl:flex-row gap-4 items-stretch flex-1">
         
-        {/* COLUMN 1: Product Catalog & Search (Expands to fill all space) */}
-        <div className="flex-1 min-w-0 space-y-3 w-full">
+        {/* COLUMN 1: Product Catalog & Search (Expands to fill all space till end of page) */}
+        <div className="flex-1 min-w-0 space-y-3 w-full flex flex-col">
           
           {/* SEARCH BAR with Bell Chime Toggle & Translate Button */}
           <div className="bg-white p-3 sm:p-3.5 rounded-2xl shadow-xs border border-slate-200">
@@ -500,9 +749,9 @@ export default function PosBilling({
             </div>
           </div>
 
-          {/* Product Catalog Grid (Expands to 3-4 columns) */}
-          <div className="bg-white p-3.5 rounded-2xl shadow-xs border border-slate-200">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 max-h-[660px] overflow-y-auto pr-1">
+          {/* Product Catalog Grid (Expands till end of page) */}
+          <div className="bg-white p-3.5 rounded-2xl shadow-xs border border-slate-200 flex-1 flex flex-col min-h-[calc(100vh-210px)]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-3 flex-1 overflow-y-auto pr-1 content-start">
               {filteredProducts.map((p) => {
                 const availableStock = getAvailableStock(p);
                 const isOutOfStock = availableStock <= 0;
@@ -533,7 +782,7 @@ export default function PosBilling({
 
                     {/* Item Details */}
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-bold text-xs sm:text-sm text-slate-900 line-clamp-2 leading-tight" title={translatedName}>
+                      <h4 className="font-bold text-sm sm:text-[15px] text-slate-900 line-clamp-2 leading-tight" title={translatedName}>
                         {translatedName}
                       </h4>
                       {language !== 'en' && translatedName !== p.name && (
@@ -543,9 +792,9 @@ export default function PosBilling({
                       )}
 
                       <div className="mt-1.5 flex items-center justify-between">
-                        <div className="text-sm sm:text-base font-black text-emerald-800">
+                        <div className="text-base sm:text-lg font-black text-emerald-800">
                           {currency}{p.selling_price}
-                          <span className="text-[11px] font-normal text-slate-500"> /{p.unit}</span>
+                          <span className="text-xs font-normal text-slate-500"> /{p.unit}</span>
                         </div>
 
                         <span
@@ -648,61 +897,96 @@ export default function PosBilling({
               ) : (
                 cart.map((item) => {
                   const translatedCartName = getTranslatedProductName(item.product_name, language);
+                  const isKg = item.unit === 'kg' || item.unit?.toLowerCase() === 'kg';
+                  const isExpanded = expandedKgItem === item.product_id;
+
                   return (
-                    <div key={item.product_id} className="py-2.5 flex items-center justify-between space-x-2">
-                      <div className="flex-1 min-w-0 pr-2">
-                        <h5 className="font-bold text-xs sm:text-sm text-slate-900 truncate" title={translatedCartName}>
-                          {translatedCartName}
-                        </h5>
-                        <div className="text-xs text-slate-500 flex items-center space-x-2 mt-0.5">
-                          <span>Rate: {currency}{item.selling_price}</span>
-                          {item.mrp > item.selling_price && (
-                            <span className="text-[10px] text-slate-400 line-through">
-                              MRP {currency}{item.mrp}
-                            </span>
+                    <div key={item.product_id} className="py-2.5 space-y-1.5">
+                      <div className="flex items-center justify-between space-x-2">
+                        
+                        {/* Left: Optional 'v' dropdown button for KG items + Item Name & Rate */}
+                        <div className="flex items-center space-x-1.5 min-w-0 flex-1 pr-1">
+                          {isKg && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedKgItem(isExpanded ? null : item.product_id)}
+                              title="KG Weight & Cost Calculator (Dropdown)"
+                              className={`w-6 h-6 rounded-md flex items-center justify-center border font-mono font-black text-xs transition shrink-0 cursor-pointer ${
+                                isExpanded
+                                  ? 'bg-emerald-700 text-white border-emerald-800 shadow-2xs'
+                                  : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                              }`}
+                            >
+                              v
+                            </button>
                           )}
-                        </div>
-                      </div>
 
-                      {/* Quantity Controls */}
-                      <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-1 border border-slate-200 shrink-0">
+                          <div className="min-w-0 flex-1">
+                            <h5 className="font-bold text-sm sm:text-[15px] text-slate-900 truncate" title={translatedCartName}>
+                              {translatedCartName}
+                            </h5>
+                            <div className="text-[13px] text-slate-600 flex items-center space-x-2 mt-0.5">
+                              <span>Rate: {currency}{item.selling_price}/{item.unit}</span>
+                              {item.mrp > item.selling_price && (
+                                <span className="text-[10px] text-slate-400 line-through">
+                                  MRP {currency}{item.mrp}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quantity Controls */}
+                        <div className="flex items-center space-x-1 bg-slate-100 rounded-lg p-1 border border-slate-200 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.product_id, -1)}
+                            className="w-7 h-7 flex items-center justify-center bg-white hover:bg-slate-200 rounded text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
+                          >
+                            <Minus className="w-3.5 h-3.5" />
+                          </button>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.001"
+                            value={item.quantity}
+                            onChange={(e) => handleManualQuantityChange(item.product_id, e.target.value)}
+                            className="w-12 text-center font-black text-xs sm:text-sm bg-transparent focus:outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => updateQuantity(item.product_id, 1)}
+                            className="w-7 h-7 flex items-center justify-center bg-white hover:bg-slate-200 rounded text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+
+                        <div className="text-right min-w-[70px] shrink-0">
+                          <div className="font-black text-base sm:text-[17px] text-slate-900">
+                            {currency}{(item.selling_price * item.quantity).toFixed(2)}
+                          </div>
+                        </div>
+
                         <button
                           type="button"
-                          onClick={() => updateQuantity(item.product_id, -1)}
-                          className="w-7 h-7 flex items-center justify-center bg-white hover:bg-slate-200 rounded text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
+                          onClick={() => removeFromCart(item.product_id)}
+                          className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition shrink-0 cursor-pointer"
+                          title="Remove Item"
                         >
-                          <Minus className="w-3.5 h-3.5" />
+                          <Trash2 className="w-4 h-4" />
                         </button>
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => handleManualQuantityChange(item.product_id, e.target.value)}
-                          className="w-10 text-center font-black text-xs sm:text-sm bg-transparent focus:outline-none"
+                      </div>
+
+                      {/* KG DROPDOWN DRAWER */}
+                      {isKg && isExpanded && (
+                        <KgCalculatorDropdown
+                          item={item}
+                          currency={currency}
+                          onApplyQty={(qty) => setExactCartQuantity(item.product_id, qty)}
+                          onClose={() => setExpandedKgItem(null)}
                         />
-                        <button
-                          type="button"
-                          onClick={() => updateQuantity(item.product_id, 1)}
-                          className="w-7 h-7 flex items-center justify-center bg-white hover:bg-slate-200 rounded text-slate-700 shadow-2xs transition active:scale-95 cursor-pointer"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-
-                      <div className="text-right min-w-[70px] shrink-0">
-                        <div className="font-black text-sm sm:text-base text-slate-900">
-                          {currency}{(item.selling_price * item.quantity).toFixed(2)}
-                        </div>
-                      </div>
-
-                      <button
-                        type="button"
-                        onClick={() => removeFromCart(item.product_id)}
-                        className="text-slate-400 hover:text-red-600 p-1.5 rounded-md hover:bg-red-50 transition shrink-0 cursor-pointer"
-                        title="Remove Item"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      )}
                     </div>
                   );
                 })
